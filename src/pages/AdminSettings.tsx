@@ -31,7 +31,8 @@ export default function AdminSettings() {
   const { showToast } = useToast();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<'shifts' | 'categories' | 'database' | 'audit'>('shifts');
+  const [activeTab, setActiveTab] = useState<'shifts' | 'categories' | 'database' | 'audit' | 'login-appearance'>('shifts');
+  const [heroInputUrl, setHeroInputUrl] = useState(() => dataService.getHeroImage());
 
   // Master Shifts
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -127,6 +128,33 @@ export default function AdminSettings() {
     }
   };
 
+  const handleSaveHeroImage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!heroInputUrl.trim()) return;
+    dataService.setHeroImage(heroInputUrl.trim());
+    showToast('Tampilan Diperbarui', 'Gambar hero halaman login berhasil disimpan.');
+  };
+
+  const handleResetHeroImage = () => {
+    const defaultUrl = 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1200&q=80';
+    dataService.setHeroImage(defaultUrl);
+    setHeroInputUrl(defaultUrl);
+    showToast('Hero Direset', 'Gambar hero dikembalikan ke default.');
+  };
+
+  const handleHeroFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const res = event.target?.result as string;
+      if (res) {
+        setHeroInputUrl(res);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="space-y-5 animate-fade-in">
       {/* =========================================================================
@@ -198,6 +226,14 @@ export default function AdminSettings() {
             }`}
           >
             Audit Log
+          </button>
+          <button
+            onClick={() => setActiveTab('login-appearance')}
+            className={`px-3 py-2 rounded-lg font-semibold whitespace-nowrap transition-colors min-h-[36px] ${
+              activeTab === 'login-appearance' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Tampilan Login
           </button>
         </div>
       </div>
@@ -462,6 +498,91 @@ export default function AdminSettings() {
             ) : (
               <p className="text-xs text-slate-400 py-6 text-center">Belum ada aktivitas yang tercatat.</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 5: LOGIN APPEARANCE & HERO IMAGE SETTINGS
+      ========================================================================= */}
+      {activeTab === 'login-appearance' && (
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-sm space-y-5">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Settings className="w-4 h-4 text-teal-600" />
+                Pengaturan Tampilan Halaman Login &amp; Hero Image
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Kelola ilustrasi/foto latar panel kiri halaman login aplikasi Shift ATLM
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+            <div className="space-y-4">
+              <form onSubmit={handleSaveHeroImage} className="space-y-4 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">URL Gambar Hero / Latar</label>
+                  <input
+                    type="url"
+                    required
+                    value={heroInputUrl}
+                    onChange={(e) => setHeroInputUrl(e.target.value)}
+                    placeholder="https://images.unsplash.com/..."
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Masukkan URL gambar langsung atau unggah file foto dari perangkat Anda di bawah.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Unggah File Gambar Baru (JPG/PNG/WebP)</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleHeroFileUpload}
+                    className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    type="submit"
+                    className="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2.5 rounded-xl transition shadow-sm"
+                  >
+                    Simpan Perubahan Hero
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetHeroImage}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2.5 rounded-xl transition"
+                  >
+                    Kembalikan ke Default
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block font-bold text-slate-700 text-xs">Pratinjau Tampilan Hero Login:</label>
+              <div className="rounded-2xl overflow-hidden border border-slate-200 shadow-md relative h-64 bg-slate-950">
+                <img
+                  src={heroInputUrl || 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1200&q=80'}
+                  alt="Hero Preview"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1200&q=80';
+                  }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-slate-950/70 to-teal-950/60 p-5 flex flex-col justify-end text-white">
+                  <span className="text-[10px] font-bold text-teal-300 uppercase tracking-wider">RSUD Sultan Muhammad Jamaludin I</span>
+                  <h4 className="font-black text-sm">SHIFT ATLM LABORATORIUM</h4>
+                  <p className="text-[11px] text-slate-300 italic">&ldquo;Bersama Menjaga Mutu, untuk Pelayanan Laboratorium yang Lebih Baik&rdquo;</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

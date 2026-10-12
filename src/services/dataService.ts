@@ -1364,6 +1364,16 @@ class DataService {
     }
   }
 
+  // Hero Image Settings for Login Page
+  public getHeroImage(): string {
+    return localStorage.getItem('shift_atlm_hero_image') || 
+      'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1200&q=80';
+  }
+
+  public setHeroImage(url: string): void {
+    this.safeLocalStorageSet('shift_atlm_hero_image', url);
+  }
+
   // Clear or reset local data to defaults
   public resetToDefaultSeed() {
     localStorage.removeItem(STORAGE_KEYS.PROFILES);
@@ -1374,6 +1384,7 @@ class DataService {
     localStorage.removeItem(STORAGE_KEYS.PENDING_TASKS);
     localStorage.removeItem(STORAGE_KEYS.AUDIT_LOGS);
     localStorage.removeItem(STORAGE_KEYS.SHIFT_SWAPS);
+    localStorage.removeItem('shift_atlm_hero_image');
     this.initLocalData();
   }
 }
