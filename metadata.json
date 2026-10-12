@@ -1,0 +1,6 @@
+{
+  "name": "SHIFT ATLM RSUD Sultan Muhammad Jamaludin I Kabupaten Kayong Utara",
+  "description": "Aplikasi manajemen jadwal shift dan serah terima jaga digital petugas Ahli Teknologi Laboratorium Medik (ATLM) RSUD Sultan Muhammad Jamaludin I Kabupaten Kayong Utara.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
