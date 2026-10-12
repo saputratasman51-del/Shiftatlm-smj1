@@ -158,7 +158,7 @@ export function NotificationBell() {
           />
 
           {/* Responsive Notification Popover: bounded on mobile phones, dropdown on desktop */}
-          <div className="fixed inset-x-3.5 top-16 max-h-[85vh] max-w-lg mx-auto sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2.5 sm:mx-0 sm:w-[430px] sm:max-h-[580px] bg-white rounded-2xl shadow-2xl border border-slate-200/90 z-50 overflow-hidden animate-scale-up text-slate-800 flex flex-col">
+          <div className="fixed inset-x-3.5 top-16 max-h-[85vh] max-w-lg mx-auto sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2.5 sm:mx-0 sm:w-[480px] sm:max-h-[580px] bg-white rounded-2xl shadow-2xl border border-slate-200/90 z-50 overflow-hidden animate-scale-up text-slate-800 flex flex-col">
             {/* Header */}
             <div className="p-3.5 sm:p-4 bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950 text-white border-b border-slate-800 shrink-0">
               <div className="flex items-center justify-between gap-2">
