@@ -19,11 +19,20 @@ import {
   X,
   Phone,
   Settings,
+  Flame,
+  Bell,
+  Volume2,
+  Share2,
+  Users,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString } from '../services/dataService';
 import { ShiftSwap, UserProfile, Shift } from '../types';
 import { useToast } from '../components/Toast';
+import { SwapReminderBanner } from '../components/SwapReminderBanner';
+import { playAlarmSound } from '../utils/alarmSound';
+import { pushNotificationService } from '../services/pushNotificationService';
 
 export default function TukarShift() {
   const { activeProfile, isAdmin } = useAuth();
@@ -71,6 +80,9 @@ export default function TukarShift() {
 
   useEffect(() => {
     loadData();
+
+    // Check push reminders for upcoming approved swaps
+    pushNotificationService.checkAndTriggerSwapReminders();
 
     // Subscribe to realtime updates for shift swaps and schedules
     const unsubscribe = dataService.subscribe((event) => {
@@ -124,8 +136,27 @@ export default function TukarShift() {
   };
 
   const handleApprove = async (id: string) => {
+    const targetSwap = swaps.find((s) => s.id === id);
     await dataService.updateShiftSwapStatus(id, 'approved', activeProfile.id);
-    showToast('Disetujui', 'Pengajuan tukar shift disetujui dan jadwal otomatis diperbarui!');
+
+    // Play pleasant broadcast notification sound
+    playAlarmSound('swap_notification');
+
+    // Trigger push notification to staff if permission granted
+    if (targetSwap) {
+      pushNotificationService.notifySwapApproved({
+        ...targetSwap,
+        status: 'approved',
+        requester: targetSwap.requester || profiles.find((p) => p.id === targetSwap.requester_id),
+        target_profile: targetSwap.target_profile || profiles.find((p) => p.id === targetSwap.target_profile_id),
+        shift: targetSwap.shift || shifts.find((sh) => sh.id === targetSwap.shift_id),
+      });
+    }
+
+    showToast(
+      'Tukar Shift Disetujui',
+      'Pemberitahuan resmi otomatis disiarkan ke seluruh rekan ATLM dan pengingat aktif sampai Hari H!'
+    );
     loadData();
   };
 
@@ -133,6 +164,33 @@ export default function TukarShift() {
     await dataService.updateShiftSwapStatus(id, 'rejected', activeProfile.id);
     showToast('Ditolak', 'Pengajuan tukar shift ditolak', 'error');
     loadData();
+  };
+
+  const handleBroadcastWhatsAppAll = (swap: ShiftSwap) => {
+    const shiftName = swap.shift?.name || 'Shift Jaga';
+    const shiftTime = swap.shift ? `${swap.shift.start_time.slice(0, 5)} - ${swap.shift.end_time.slice(0, 5)} WIB` : '';
+    const reqName = swap.requester?.full_name || 'Petugas ATLM';
+    const targetName = swap.target_profile?.full_name || 'Rekan ATLM';
+
+    const todayStr = getPontianakDateString();
+    const today = new Date(todayStr);
+    const swapDate = new Date(swap.shift_date);
+    const diffDays = Math.ceil((swapDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    const countdown = diffDays === 0 ? 'HARI H (HARI INI)' : diffDays === 1 ? 'H-1 (BESOK)' : `H-${diffDays} (${diffDays} hari lagi)`;
+
+    const message = `📢 *PEMBERITAHUAN RESMI TUKAR SHIFT (UNTUK SELURUH PETUGAS ATLM)*\n` +
+      `RSUD Sultan Muhammad Jamaludin I Kabupaten Kayong Utara\n\n` +
+      `Status Pengingat: *${countdown}*\n` +
+      `📅 Tanggal: *${swap.shift_date}*\n` +
+      `⏰ Shift: *${shiftName}* (${shiftTime})\n` +
+      `🔄 Pemohon: *${reqName}*\n` +
+      `✅ Rekan Pengganti: *${targetName}*\n` +
+      `📝 Alasan: ${swap.reason || 'Keperluan dinas / mendesak'}\n\n` +
+      `Diberitahukan kepada seluruh rekan petugas laboratorium dan penanggung jawab operan bahwa pertukaran shift di atas *TELAH DISETUJUI RESMI* dan jadwal dinas telah disesuaikan di sistem SHIFT ATLM.\n\n` +
+      `Mohon rekan pengganti hadir tepat waktu dan melaksanakan serah terima dengan tertib. Terima kasih!`;
+
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+    showToast('WhatsApp Dibuka', 'Format pesan broadcast seluruh petugas telah disiapkan.');
   };
 
   const handleSendWhatsApp = (swap: ShiftSwap) => {
@@ -205,26 +263,82 @@ export default function TukarShift() {
         </button>
       </div>
 
+      {/* =========================================================================
+          BANNER PENGINGAT PERTUKARAN SHIFT AKTIF (SAMPAI HARI H)
+      ========================================================================= */}
+      <SwapReminderBanner />
+
       {/* List of Swaps */}
       <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+            <RefreshCw className="w-4 h-4 text-teal-600" />
+            <span>Semua Riwayat Pertukaran Shift</span>
+          </h2>
+          <span className="text-xs text-slate-500 font-mono">
+            {swaps.length} pengajuan
+          </span>
+        </div>
+
         {swaps.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {swaps.map((s) => {
               const isMyRequest = s.requester_id === activeProfile.id;
               const isTargetMe = s.target_profile_id === activeProfile.id;
 
+              const todayStr = getPontianakDateString();
+              const today = new Date(todayStr);
+              const swapDate = new Date(s.shift_date);
+              const diffDays = Math.ceil((swapDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              const isHariH = s.status === 'approved' && diffDays === 0;
+              const isHMinus1 = s.status === 'approved' && diffDays === 1;
+              const isFutureReminder = s.status === 'approved' && diffDays > 1;
+
               return (
                 <div
                   key={s.id}
                   className={`bg-white rounded-2xl p-4 border transition-all shadow-2xs space-y-3 relative overflow-hidden ${
-                    s.status === 'approved'
+                    isHariH
+                      ? 'border-amber-400 bg-amber-50/20 ring-2 ring-amber-400/50'
+                      : isHMinus1
+                      ? 'border-teal-300 bg-teal-50/15 ring-1 ring-teal-300/40'
+                      : s.status === 'approved'
                       ? 'border-emerald-300 bg-emerald-50/10'
                       : s.status === 'rejected'
                       ? 'border-rose-200 bg-rose-50/10'
                       : 'border-slate-200 hover:border-slate-300'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
+                  {/* Top countdown stripe if approved & active until Hari H */}
+                  {s.status === 'approved' && diffDays >= 0 && (
+                    <div
+                      className={`-mx-4 -mt-4 px-4 py-1.5 flex items-center justify-between text-[11px] font-black text-white uppercase tracking-wider ${
+                        isHariH
+                          ? 'bg-gradient-to-r from-amber-600 to-rose-600 animate-pulse'
+                          : isHMinus1
+                          ? 'bg-gradient-to-r from-teal-700 to-blue-700'
+                          : 'bg-slate-800'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Bell className="w-3.5 h-3.5 shrink-0" />
+                        {isHariH
+                          ? '🔥 HARI H PERTUKARAN SHIFT (HARI INI)!'
+                          : isHMinus1
+                          ? '⏰ PENGINGAT H-1 (BESOK)!'
+                          : `📅 PENGINGAT H-${diffDays} (${diffDays} HARI LAGI)`}
+                      </span>
+                      <button
+                        onClick={() => playAlarmSound('swap_reminder')}
+                        title="Bunyikan nada pengingat"
+                        className="p-1 rounded bg-white/20 hover:bg-white/30 text-white transition"
+                      >
+                        <Volume2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-1">
                     <div className="flex items-center gap-2">
                       <span
                         className="w-3 h-3 rounded-full"
@@ -246,7 +360,7 @@ export default function TukarShift() {
                       }`}
                     >
                       {s.status === 'approved'
-                        ? 'Disetujui (Riwayat Shift Diperbarui)'
+                        ? 'Disetujui (Jadwal Otomatis Diperbarui)'
                         : s.status === 'rejected'
                         ? 'Ditolak'
                         : 'Menunggu Konfirmasi'}
@@ -267,6 +381,20 @@ export default function TukarShift() {
                     </div>
                   </div>
 
+                  {/* Broadcast info banner for all staff */}
+                  {s.status === 'approved' && (
+                    <div className="text-xs bg-emerald-50/70 border border-emerald-200 p-2.5 rounded-xl space-y-1">
+                      <div className="flex items-center gap-1.5 text-emerald-800 font-bold text-[11px]">
+                        <Users className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Notifikasi Terkirim ke Seluruh Petugas ATLM</span>
+                      </div>
+                      <p className="text-slate-700 text-[11px] leading-relaxed">
+                        <strong className="text-teal-900">{s.target_profile?.full_name}</strong> resmi menggantikan tugas jaga{' '}
+                        <strong className="text-slate-900">{s.requester?.full_name}</strong> pada {s.shift?.name}. Jadwal telah disesuaikan dan pengingat aktif sampai Hari H pertukaran.
+                      </p>
+                    </div>
+                  )}
+
                   {s.reason && (
                     <div className="text-xs text-slate-600 bg-amber-50/50 p-2.5 rounded-lg border border-amber-200/50">
                       <span className="font-semibold text-amber-800">Alasan: </span>
@@ -275,20 +403,35 @@ export default function TukarShift() {
                   )}
 
                   {/* Action buttons */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                    <button
-                      onClick={() => handleSendWhatsApp(s)}
-                      className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-xl transition-colors shadow-2xs"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      <span>{s.whatsapp_sent ? 'Kirim Ulang WA' : 'Hubungi via WhatsApp'}</span>
-                    </button>
+                  <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleSendWhatsApp(s)}
+                        className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-xl transition-colors shadow-2xs"
+                        title="Kirim konfirmasi WhatsApp ke rekan"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>{s.whatsapp_sent ? 'Kirim Ulang WA' : 'Hubungi Rekan via WA'}</span>
+                      </button>
+
+                      {s.status === 'approved' && (
+                        <button
+                          onClick={() => handleBroadcastWhatsAppAll(s)}
+                          className="flex items-center gap-1.5 bg-teal-800 hover:bg-teal-700 text-teal-100 font-bold py-2 px-3 rounded-xl transition-colors shadow-2xs"
+                          title="Siarkan pemberitahuan resmi ke grup WhatsApp ATLM"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Siarkan ke Grup WA</span>
+                          <span className="sm:hidden">Grup WA</span>
+                        </button>
+                      )}
+                    </div>
 
                     {(isAdmin || isTargetMe) && s.status === 'pending' && (
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => handleApprove(s.id)}
-                          className="flex items-center gap-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-3 rounded-xl transition-colors"
+                          className="flex items-center gap-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-3 rounded-xl transition-colors shadow-2xs"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>Setujui</span>

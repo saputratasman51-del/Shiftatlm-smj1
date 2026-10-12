@@ -27,6 +27,7 @@ import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString, getPontianakTimeString } from '../services/dataService';
 import { ShiftAssignment, Handover, PendingTask, Shift, HandoverCategory, UserProfile } from '../types';
 import { Avatar } from '../components/Avatar';
+import { SwapReminderBanner } from '../components/SwapReminderBanner';
 import {
   BarChart,
   Bar,
@@ -338,6 +339,11 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* =========================================================================
+          PENGINGAT PERTUKARAN SHIFT AKTIF (UNTUK SELURUH PETUGAS SAMPAI HARI H)
+      ========================================================================= */}
+      <SwapReminderBanner />
 
       {/* =========================================================================
           WARNING ALERT: PENDING HANDOVER

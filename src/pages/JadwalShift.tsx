@@ -27,6 +27,7 @@ import { dataService, getPontianakDateString } from '../services/dataService';
 import { Shift, ShiftAssignment, UserProfile } from '../types';
 import { useToast } from '../components/Toast';
 import { playAlarmSound } from '../utils/alarmSound';
+import { SwapReminderBanner } from '../components/SwapReminderBanner';
 
 export default function JadwalShift() {
   const { activeProfile, isAdmin } = useAuth();
@@ -349,6 +350,11 @@ export default function JadwalShift() {
           )}
         </div>
       </div>
+
+      {/* =========================================================================
+          BANNER PENGINGAT PERTUKARAN SHIFT AKTIF (UNTUK SELURUH PETUGAS SAMPAI HARI H)
+      ========================================================================= */}
+      <SwapReminderBanner />
 
       {/* =========================================================================
           BANNER LIBUR PETUGAS (JIKA PETUGAS LIBUR HARI INI)

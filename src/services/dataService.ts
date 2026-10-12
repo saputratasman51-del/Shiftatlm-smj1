@@ -1211,6 +1211,43 @@ class DataService {
       }
     }
 
+    if (swaps.length === 0) {
+      const today = getPontianakDateString();
+      const nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + 2);
+      const futureDate = getPontianakDateString(nextDate);
+
+      swaps = [
+        {
+          id: 'swap-demo-hari-h',
+          requester_id: 'user-staff-4',
+          target_profile_id: 'user-staff-3',
+          shift_date: today,
+          shift_id: 'shift-pagi',
+          reason: 'Keperluan dinas pelatihan mutu akreditasi laboratorium',
+          status: 'approved',
+          approved_by: 'user-1791788423659',
+          approved_at: new Date().toISOString(),
+          whatsapp_sent: true,
+          created_at: new Date(Date.now() - 86400000).toISOString(),
+        },
+        {
+          id: 'swap-demo-future',
+          requester_id: 'user-staff-3',
+          target_profile_id: 'user-1791788423659',
+          shift_date: futureDate,
+          shift_id: 'shift-siang',
+          reason: 'Urusan keluarga mendesak di luar kota',
+          status: 'approved',
+          approved_by: 'user-1791788423659',
+          approved_at: new Date().toISOString(),
+          whatsapp_sent: true,
+          created_at: new Date().toISOString(),
+        },
+      ];
+      this.safeLocalStorageSet(STORAGE_KEYS.SHIFT_SWAPS, JSON.stringify(swaps));
+    }
+
     const [allProfiles, allShifts] = await Promise.all([this.getProfiles(), this.getShifts()]);
     return swaps.map((s) => ({
       ...s,
