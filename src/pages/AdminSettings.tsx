@@ -21,6 +21,7 @@ import { dataService } from '../services/dataService';
 import { Shift, HandoverCategory, AuditLog } from '../types';
 import { useToast } from '../components/Toast';
 import { supabase } from '../lib/supabase';
+import { SUPABASE_PATCH_SQL } from '../lib/supabaseSqlScripts';
 
 export default function AdminSettings() {
   const { isAdmin, activeProfile } = useAuth();
@@ -105,15 +106,12 @@ export default function AdminSettings() {
 
   // Copy SQL script
   const handleCopySQL = () => {
-    fetch('/supabase_schema.sql')
-      .then((res) => res.text())
-      .then((sql) => {
-        navigator.clipboard.writeText(sql);
-        showToast('Skrip SQL Disalin', 'Skrip migrasi database & RLS berhasil disalin ke clipboard');
-      })
-      .catch(() => {
-        showToast('Info', 'Buka file /supabase_schema.sql di direktori proyek', 'info');
-      });
+    try {
+      navigator.clipboard.writeText(SUPABASE_PATCH_SQL);
+      showToast('Skrip SQL Disalin', 'Skrip perbaikan RLS & Realtime Supabase berhasil disalin ke clipboard');
+    } catch {
+      showToast('Info', 'Buka file /supabase_patch_rls_realtime.sql di direktori proyek', 'info');
+    }
   };
 
   // Reset to seed

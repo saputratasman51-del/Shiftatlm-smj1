@@ -158,100 +158,257 @@ const STORAGE_KEYS = {
 };
 
 // Helper to get today's date formatted in Asia/Pontianak
-export function getPontianakDateString(date = new Date()): string {
-  // Format YYYY-MM-DD
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+export function getPontianakDateString(date: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Pontianak',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+
   return `${year}-${month}-${day}`;
 }
 
-export function getPontianakTimeString(date = new Date()): string {
-  return date.toLocaleTimeString('id-ID', {
+export function getPontianakTimeString(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Pontianak',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
-    timeZone: 'Asia/Pontianak',
-  });
+    second: '2-digit',
+  }).format(date);
 }
 
+export type RealtimeEventCallback = (event: {
+  table: string;
+  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'SYNC';
+  data?: any;
+}) => void;
+
+export type SyncStatus = {
+  connected: boolean;
+  channelStatus: 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR' | 'CONNECTING';
+  lastSynced: Date | null;
+  error: string | null;
+  isSupabaseConfigured: boolean;
+};
+
 class DataService {
-  private isSupabaseAvailable(): boolean {
+  private realtimeChannel: any = null;
+  private listeners: Set<RealtimeEventCallback> = new Set();
+  private statusListeners: Set<(status: SyncStatus) => void> = new Set();
+  private syncStatus: SyncStatus = {
+    connected: false,
+    channelStatus: 'CONNECTING',
+    lastSynced: null,
+    error: null,
+    isSupabaseConfigured: false,
+  };
+
+  constructor() {
+    this.syncStatus.isSupabaseConfigured = this.isSupabaseAvailable();
+    this.setupRealtimeSync();
+  }
+
+  public isSupabaseAvailable(): boolean {
     return !!supabase;
   }
 
+  /**
+   * Safe setItem to localStorage to prevent QuotaExceededError
+   */
   private safeLocalStorageSet(key: string, value: string): void {
     try {
       localStorage.setItem(key, value);
     } catch (e: any) {
       console.warn('LocalStorage quota exceeded for key:', key, e);
       try {
-        // Step 1: Evict temporary / non-critical history
         localStorage.removeItem(STORAGE_KEYS.AUDIT_LOGS);
-        localStorage.removeItem(STORAGE_KEYS.PENDING_TASKS);
-        localStorage.removeItem(STORAGE_KEYS.SHIFT_SWAPS);
-
-        // If storing profiles, check if we need to trim heavy data (like long base64 avatars)
-        if (key === STORAGE_KEYS.PROFILES) {
-          try {
-            const parsed = JSON.parse(value);
-            if (Array.isArray(parsed)) {
-              const stripped = parsed.map((p: any) => ({
-                ...p,
-                // If avatar is an oversized base64, remove it in fallback storage to prevent blocking profile saves
-                avatar_url: p.avatar_url && p.avatar_url.length > 2000 ? undefined : p.avatar_url,
-              }));
-              localStorage.setItem(key, JSON.stringify(stripped));
-              return;
-            }
-          } catch (stripErr) {
-            // continue
-          }
-        }
-
-        // Retry saving original
         localStorage.setItem(key, value);
-      } catch (e2) {
-        console.warn('Could not store full item in localStorage after cleanup (Supabase remains authoritative):', e2);
-        // Do not throw so caller async operations (like saving profiles, handovers) continue smoothly
+      } catch (innerErr) {
+        console.warn('Failed to save to localStorage after audit log eviction:', innerErr);
       }
     }
   }
 
-  // --- INITIALIZATION ---
-  public initLocalData() {
-    // Purge legacy demo data if present
-    try {
-      const assignments = JSON.parse(localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS) || '[]');
-      if (assignments.some((a: any) => a.id === 'assign-1')) {
-        localStorage.removeItem(STORAGE_KEYS.ASSIGNMENTS);
-      }
-      const handovers = JSON.parse(localStorage.getItem(STORAGE_KEYS.HANDOVERS) || '[]');
-      if (handovers.some((h: any) => h.id === 'ho-sample-1')) {
-        localStorage.removeItem(STORAGE_KEYS.HANDOVERS);
-      }
-      const tasks = JSON.parse(localStorage.getItem(STORAGE_KEYS.PENDING_TASKS) || '[]');
-      if (tasks.some((t: any) => t.id === 'task-1')) {
-        localStorage.removeItem(STORAGE_KEYS.PENDING_TASKS);
-      }
-      const audit = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS) || '[]');
-      if (audit.some((a: any) => a.id === 'audit-1')) {
-        localStorage.removeItem(STORAGE_KEYS.AUDIT_LOGS);
-      }
-    } catch (e) {
-      // ignore
+  // --- REALTIME SUBSCRIPTIONS & BROADCAST ---
+  private setupRealtimeSync() {
+    if (!this.isSupabaseAvailable()) {
+      this.updateStatus({
+        connected: false,
+        channelStatus: 'CLOSED',
+        error: 'Supabase credentials not configured',
+      });
+      return;
     }
 
+    try {
+      // Connect to global realtime hospital sync channel
+      this.realtimeChannel = supabase.channel('hospital_realtime_sync', {
+        config: {
+          broadcast: { self: false },
+        },
+      });
+
+      // 1. Listen for Postgres changes on all database tables
+      const tables = [
+        'profiles',
+        'shifts',
+        'shift_assignments',
+        'handovers',
+        'pending_tasks',
+        'shift_swaps',
+        'audit_logs',
+      ];
+
+      tables.forEach((table) => {
+        this.realtimeChannel.on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table },
+          (payload: any) => {
+            console.log(`[Supabase Realtime DB] ${table}:`, payload.eventType, payload.new || payload.old);
+            this.handleRemoteChange(table, payload.eventType, payload.new || payload.old);
+          }
+        );
+      });
+
+      // 2. Listen for Broadcast messages across all staff devices
+      this.realtimeChannel.on(
+        'broadcast',
+        { event: 'REALTIME_CHANGE' },
+        (payload: any) => {
+          if (payload?.payload) {
+            const { table, action, data } = payload.payload;
+            console.log(`[Supabase Realtime Broadcast] ${table}:`, action, data);
+            this.handleRemoteChange(table, action, data);
+          }
+        }
+      );
+
+      // 3. Subscribe to the channel
+      this.realtimeChannel.subscribe((status: string, err: any) => {
+        console.log('[Supabase Realtime Channel Status]:', status, err || '');
+        if (status === 'SUBSCRIBED') {
+          this.updateStatus({
+            connected: true,
+            channelStatus: 'SUBSCRIBED',
+            lastSynced: new Date(),
+            error: null,
+          });
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          this.updateStatus({
+            connected: false,
+            channelStatus: status as any,
+            error: err?.message || `Koneksi realtime ${status.toLowerCase()}`,
+          });
+        } else {
+          this.updateStatus({
+            channelStatus: status as any,
+          });
+        }
+      });
+    } catch (e: any) {
+      console.warn('Error setting up Supabase Realtime:', e);
+      this.updateStatus({
+        connected: false,
+        channelStatus: 'CHANNEL_ERROR',
+        error: e.message || 'Gagal menginisialisasi realtime',
+      });
+    }
+  }
+
+  private updateStatus(partial: Partial<SyncStatus>) {
+    this.syncStatus = { ...this.syncStatus, ...partial };
+    this.statusListeners.forEach((fn) => fn(this.syncStatus));
+  }
+
+  public getSyncStatus(): SyncStatus {
+    return { ...this.syncStatus };
+  }
+
+  public onStatusChange(callback: (status: SyncStatus) => void): () => void {
+    this.statusListeners.add(callback);
+    callback(this.syncStatus);
+    return () => {
+      this.statusListeners.delete(callback);
+    };
+  }
+
+  /**
+   * Broadcast change to all other active staff sessions
+   */
+  public broadcastChange(table: string, action: 'INSERT' | 'UPDATE' | 'DELETE' | 'SYNC', data?: any) {
+    if (this.realtimeChannel && this.syncStatus.connected) {
+      try {
+        this.realtimeChannel.send({
+          type: 'broadcast',
+          event: 'REALTIME_CHANGE',
+          payload: { table, action, data },
+        });
+      } catch (err) {
+        console.warn('Broadcast send failed:', err);
+      }
+    }
+    // Also notify local components immediately
+    this.notifyListeners({ table, action, data });
+  }
+
+  /**
+   * Register a component to receive realtime data changes
+   */
+  public subscribe(callback: RealtimeEventCallback): () => void {
+    this.listeners.add(callback);
+    return () => {
+      this.listeners.delete(callback);
+    };
+  }
+
+  private notifyListeners(event: { table: string; action: 'INSERT' | 'UPDATE' | 'DELETE' | 'SYNC'; data?: any }) {
+    this.listeners.forEach((cb) => {
+      try {
+        cb(event);
+      } catch (err) {
+        console.error('Error in realtime listener callback:', err);
+      }
+    });
+  }
+
+  private async handleRemoteChange(table: string, action: any, data: any) {
+    this.updateStatus({ lastSynced: new Date() });
+
+    // Sync remote data into local storage cache
+    if (table === 'profiles') {
+      await this.getProfiles(true);
+    } else if (table === 'shift_assignments') {
+      await this.getAssignments(undefined, true);
+    } else if (table === 'handovers') {
+      await this.getHandovers(undefined, true);
+    } else if (table === 'pending_tasks') {
+      await this.getPendingTasks(undefined, true);
+    } else if (table === 'shift_swaps') {
+      await this.getShiftSwaps(true);
+    } else if (table === 'shifts') {
+      await this.getShifts(true);
+    }
+
+    this.notifyListeners({ table, action: (action || 'SYNC') as any, data });
+  }
+
+  /**
+   * Initialize local cache and ensure default initial seeds exist
+   */
+  public initLocalData() {
     if (!localStorage.getItem(STORAGE_KEYS.PROFILES)) {
       this.safeLocalStorageSet(STORAGE_KEYS.PROFILES, JSON.stringify(INITIAL_PROFILES));
     } else {
       try {
-        // Clean up any oversized base64 avatars that might have bloated localStorage in past sessions
         const stored: UserProfile[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PROFILES) || '[]');
         let updated = false;
         const patched = stored.map((p) => {
           let av = p.avatar_url;
-          // If avatar is an enormous data URL (> 20KB), remove or replace
           if (av && av.startsWith('data:') && av.length > 25000) {
             av = undefined;
             updated = true;
@@ -272,6 +429,7 @@ class DataService {
         console.warn('Error patching profile avatars:', e);
       }
     }
+
     if (!localStorage.getItem(STORAGE_KEYS.SHIFTS)) {
       this.safeLocalStorageSet(STORAGE_KEYS.SHIFTS, JSON.stringify(INITIAL_SHIFTS));
     }
@@ -281,32 +439,66 @@ class DataService {
     if (!localStorage.getItem(STORAGE_KEYS.ACTIVE_USER_ID)) {
       this.safeLocalStorageSet(STORAGE_KEYS.ACTIVE_USER_ID, INITIAL_PROFILES[0].id);
     }
-
-    const today = getPontianakDateString();
-
-    // Seed assignments as empty array (no demo data)
     if (!localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS)) {
       this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify([]));
     }
-
-    // Seed pending tasks as empty array (no demo data)
     if (!localStorage.getItem(STORAGE_KEYS.PENDING_TASKS)) {
       this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify([]));
     }
-
-    // Seed handovers as empty array (no demo data)
     if (!localStorage.getItem(STORAGE_KEYS.HANDOVERS)) {
       this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify([]));
     }
-
-    // Seed audit logs as empty array (no demo data)
     if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
       this.safeLocalStorageSet(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify([]));
     }
-
-    // Seed shift swaps as empty array
     if (!localStorage.getItem(STORAGE_KEYS.SHIFT_SWAPS)) {
       this.safeLocalStorageSet(STORAGE_KEYS.SHIFT_SWAPS, JSON.stringify([]));
+    }
+
+    // Trigger initial background sync with Supabase
+    this.seedSupabaseIfEmpty();
+  }
+
+  /**
+   * Seed initial data to Supabase if tables are newly created and empty
+   */
+  public async seedSupabaseIfEmpty() {
+    if (!this.isSupabaseAvailable()) return;
+
+    try {
+      // 1. Check profiles
+      const { data: profs, error: profErr } = await supabase.from('profiles').select('id').limit(1);
+      if (!profErr && profs && profs.length === 0) {
+        console.log('Seeding initial profiles to Supabase...');
+        const cleanProfiles = INITIAL_PROFILES.map((p) => ({
+          id: p.id,
+          full_name: p.full_name,
+          nip_str: p.nip_str,
+          role: p.role,
+          position: p.position,
+          phone: p.phone,
+          avatar_url: p.avatar_url,
+          password: p.password || '123',
+          is_active: p.is_active,
+        }));
+        await supabase.from('profiles').upsert(cleanProfiles);
+      }
+
+      // 2. Check shifts
+      const { data: shiftData, error: shiftErr } = await supabase.from('shifts').select('id').limit(1);
+      if (!shiftErr && shiftData && shiftData.length === 0) {
+        console.log('Seeding initial shifts to Supabase...');
+        await supabase.from('shifts').upsert(INITIAL_SHIFTS);
+      }
+
+      // 3. Check categories
+      const { data: catData, error: catErr } = await supabase.from('handover_categories').select('id').limit(1);
+      if (!catErr && catData && catData.length === 0) {
+        console.log('Seeding initial categories to Supabase...');
+        await supabase.from('handover_categories').upsert(INITIAL_CATEGORIES);
+      }
+    } catch (e) {
+      console.warn('Initial Supabase seeding check:', e);
     }
   }
 
@@ -327,13 +519,18 @@ class DataService {
   }
 
   // --- PROFILES ---
-  public async getProfiles(): Promise<UserProfile[]> {
+  public async getProfiles(forceRefresh = false): Promise<UserProfile[]> {
     if (this.isSupabaseAvailable()) {
       try {
         const { data, error } = await supabase.from('profiles').select('*').order('full_name');
-        if (!error && data && data.length > 0) return data;
-      } catch (e) {
+        if (!error && data && data.length > 0) {
+          this.safeLocalStorageSet(STORAGE_KEYS.PROFILES, JSON.stringify(data));
+          this.updateStatus({ connected: true, lastSynced: new Date() });
+          return data;
+        }
+      } catch (e: any) {
         console.warn('Fallback to local profiles:', e);
+        this.updateStatus({ error: e.message });
       }
     }
     const local = localStorage.getItem(STORAGE_KEYS.PROFILES);
@@ -356,9 +553,25 @@ class DataService {
 
     if (this.isSupabaseAvailable()) {
       try {
-        await supabase.from('profiles').upsert(profile);
-      } catch (err) {
-        console.warn('Supabase upsert failed:', err);
+        const cleanPayload = {
+          id: profile.id,
+          full_name: profile.full_name,
+          nip_str: profile.nip_str,
+          role: profile.role,
+          position: profile.position,
+          phone: profile.phone,
+          avatar_url: profile.avatar_url,
+          password: profile.password || '123',
+          is_active: profile.is_active,
+        };
+        const { error } = await supabase.from('profiles').upsert(cleanPayload);
+        if (error) {
+          console.warn('Supabase upsert profile warning:', error.message);
+        } else {
+          this.updateStatus({ connected: true, lastSynced: new Date() });
+        }
+      } catch (err: any) {
+        console.warn('Supabase save profile failed:', err);
       }
     }
 
@@ -367,6 +580,7 @@ class DataService {
       role: profile.role,
     });
 
+    this.broadcastChange('profiles', existingIndex >= 0 ? 'UPDATE' : 'INSERT', profile);
     return profile;
   }
 
@@ -377,13 +591,17 @@ class DataService {
 
     if (this.isSupabaseAvailable()) {
       try {
-        await supabase.from('profiles').delete().eq('id', id);
+        const { error } = await supabase.from('profiles').delete().eq('id', id);
+        if (!error) {
+          this.updateStatus({ connected: true, lastSynced: new Date() });
+        }
       } catch (err) {
         console.warn('Supabase delete profile failed:', err);
       }
     }
 
     this.logAudit(this.getActiveUserId(), 'DELETE_PROFILE', 'profiles', id, {});
+    this.broadcastChange('profiles', 'DELETE', { id });
     return true;
   }
 
@@ -413,16 +631,19 @@ class DataService {
     });
     if (index === -1) return false;
     profiles[index].password = newPass;
-    this.safeLocalStorageSet(STORAGE_KEYS.PROFILES, JSON.stringify(profiles));
+    await this.saveProfile(profiles[index]);
     return true;
   }
 
   // --- SHIFTS ---
-  public async getShifts(): Promise<Shift[]> {
+  public async getShifts(forceRefresh = false): Promise<Shift[]> {
     if (this.isSupabaseAvailable()) {
       try {
         const { data, error } = await supabase.from('shifts').select('*').order('start_time');
-        if (!error && data && data.length > 0) return data;
+        if (!error && data && data.length > 0) {
+          this.safeLocalStorageSet(STORAGE_KEYS.SHIFTS, JSON.stringify(data));
+          return data;
+        }
       } catch (e) {
         console.warn('Fallback to local shifts:', e);
       }
@@ -439,30 +660,47 @@ class DataService {
 
     if (this.isSupabaseAvailable()) {
       try {
-        await supabase.from('shifts').upsert(shift);
+        await supabase.from('shifts').upsert({
+          id: shift.id,
+          name: shift.name,
+          code: shift.code,
+          start_time: shift.start_time,
+          end_time: shift.end_time,
+          color_code: shift.color_code,
+          description: shift.description,
+          is_active: shift.is_active,
+        });
       } catch (err) {
         console.warn('Supabase upsert shift failed:', err);
       }
     }
+
+    this.broadcastChange('shifts', idx >= 0 ? 'UPDATE' : 'INSERT', shift);
     return shift;
   }
 
   // --- SHIFT ASSIGNMENTS (JADWAL) ---
-  public async getAssignments(filters?: {
-    date?: string;
-    month?: string; // YYYY-MM
-    profileId?: string;
-  }): Promise<ShiftAssignment[]> {
+  public async getAssignments(
+    filters?: {
+      date?: string;
+      month?: string; // YYYY-MM
+      profileId?: string;
+    },
+    forceRefresh = false
+  ): Promise<ShiftAssignment[]> {
     let assignments: ShiftAssignment[] = [];
 
     if (this.isSupabaseAvailable()) {
       try {
-        let query = supabase.from('shift_assignments').select('*, shift:shifts(*), profile:profiles(*)');
+        let query = supabase.from('shift_assignments').select('*');
         if (filters?.date) query = query.eq('shift_date', filters.date);
         if (filters?.profileId) query = query.eq('profile_id', filters.profileId);
         const { data, error } = await query;
         if (!error && data) {
           assignments = data;
+          if (!filters?.date && !filters?.profileId && !filters?.month) {
+            this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(data));
+          }
         }
       } catch (e) {
         console.warn('Fallback to local assignments:', e);
@@ -474,7 +712,7 @@ class DataService {
       assignments = local ? JSON.parse(local) : [];
     }
 
-    // Attach shift & profile details if missing
+    // Attach shift & profile details
     const [allShifts, allProfiles] = await Promise.all([this.getShifts(), this.getProfiles()]);
     assignments = assignments.map((a) => ({
       ...a,
@@ -522,15 +760,21 @@ class DataService {
 
     if (this.isSupabaseAvailable()) {
       try {
-        await supabase.from('shift_assignments').upsert({
+        const cleanPayload = {
           id: assignment.id,
           shift_id: assignment.shift_id,
           profile_id: assignment.profile_id,
           shift_date: assignment.shift_date,
           status: assignment.status,
-          notes: assignment.notes,
+          notes: assignment.notes || '',
           created_by: assignment.created_by,
-        });
+        };
+        const { error } = await supabase.from('shift_assignments').upsert(cleanPayload);
+        if (error) {
+          console.warn('Supabase upsert assignment warning:', error.message);
+        } else {
+          this.updateStatus({ connected: true, lastSynced: new Date() });
+        }
       } catch (err) {
         console.warn('Supabase upsert assignment failed:', err);
       }
@@ -542,6 +786,7 @@ class DataService {
       profile: assignment.profile_id,
     });
 
+    this.broadcastChange('shift_assignments', idx >= 0 ? 'UPDATE' : 'INSERT', assignment);
     return { success: true };
   }
 
@@ -552,13 +797,17 @@ class DataService {
 
     if (this.isSupabaseAvailable()) {
       try {
-        await supabase.from('shift_assignments').delete().eq('id', id);
+        const { error } = await supabase.from('shift_assignments').delete().eq('id', id);
+        if (!error) {
+          this.updateStatus({ connected: true, lastSynced: new Date() });
+        }
       } catch (err) {
         console.warn('Supabase delete assignment failed:', err);
       }
     }
 
     this.logAudit(this.getActiveUserId(), 'DELETE_JADWAL', 'shift_assignments', id, {});
+    this.broadcastChange('shift_assignments', 'DELETE', { id });
     return true;
   }
 
@@ -567,7 +816,10 @@ class DataService {
     if (this.isSupabaseAvailable()) {
       try {
         const { data, error } = await supabase.from('handover_categories').select('*').order('order_index');
-        if (!error && data && data.length > 0) return data;
+        if (!error && data && data.length > 0) {
+          this.safeLocalStorageSet(STORAGE_KEYS.CATEGORIES, JSON.stringify(data));
+          return data;
+        }
       } catch (e) {
         console.warn('Fallback to local categories:', e);
       }
@@ -584,7 +836,13 @@ class DataService {
 
     if (this.isSupabaseAvailable()) {
       try {
-        await supabase.from('handover_categories').upsert(category);
+        await supabase.from('handover_categories').upsert({
+          id: category.id,
+          code: category.code,
+          name: category.name,
+          order_index: category.order_index,
+          is_active: category.is_active,
+        });
       } catch (err) {
         console.warn('Supabase upsert category failed:', err);
       }
@@ -593,12 +851,15 @@ class DataService {
   }
 
   // --- HANDOVERS (SERAH TERIMA JAGA) ---
-  public async getHandovers(filters?: {
-    date?: string;
-    status?: HandoverStatus;
-    giverId?: string;
-    receiverId?: string;
-  }): Promise<Handover[]> {
+  public async getHandovers(
+    filters?: {
+      date?: string;
+      status?: HandoverStatus;
+      giverId?: string;
+      receiverId?: string;
+    },
+    forceRefresh = false
+  ): Promise<Handover[]> {
     let handovers: Handover[] = [];
 
     if (this.isSupabaseAvailable()) {
@@ -609,6 +870,9 @@ class DataService {
         const { data, error } = await query;
         if (!error && data) {
           handovers = data;
+          if (!filters?.date && !filters?.status) {
+            this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(data));
+          }
         }
       } catch (e) {
         console.warn('Fallback to local handovers:', e);
@@ -682,19 +946,29 @@ class DataService {
 
     if (this.isSupabaseAvailable()) {
       try {
-        await supabase.from('handovers').upsert({
+        const cleanPayload = {
           id: handover.id,
           shift_date: handover.shift_date,
           shift_from_id: handover.shift_from_id,
           shift_to_id: handover.shift_to_id,
           giver_profile_id: handover.giver_profile_id,
-          receiver_profile_id: handover.receiver_profile_id,
+          receiver_profile_id: handover.receiver_profile_id || null,
           status: handover.status,
-          given_at: handover.given_at,
-          received_at: handover.received_at,
-          total_patients: handover.total_patients,
-          revision_notes: handover.revision_notes,
-        });
+          given_at: handover.given_at || null,
+          received_at: handover.received_at || null,
+          total_patients: handover.total_patients || 0,
+          revision_notes: handover.revision_notes || '',
+          categories_data: handover.categories_data || {},
+          lab_conditions: handover.lab_conditions || [],
+          pending_tasks: handover.pending_tasks || [],
+          status_logs: handover.status_logs || [],
+        };
+        const { error } = await supabase.from('handovers').upsert(cleanPayload);
+        if (error) {
+          console.warn('Supabase save handover warning:', error.message);
+        } else {
+          this.updateStatus({ connected: true, lastSynced: new Date() });
+        }
       } catch (err) {
         console.warn('Supabase save handover failed:', err);
       }
@@ -706,11 +980,12 @@ class DataService {
       total_patients: handover.total_patients,
     });
 
+    this.broadcastChange('handovers', idx >= 0 ? 'UPDATE' : 'INSERT', handover);
     return handover;
   }
 
   // --- PENDING TASKS ---
-  public async getPendingTasks(statusFilter?: string): Promise<PendingTask[]> {
+  public async getPendingTasks(statusFilter?: string, forceRefresh = false): Promise<PendingTask[]> {
     let tasks: PendingTask[] = [];
 
     if (this.isSupabaseAvailable()) {
@@ -718,7 +993,12 @@ class DataService {
         let query = supabase.from('pending_tasks').select('*').order('created_at', { ascending: false });
         if (statusFilter) query = query.eq('status', statusFilter);
         const { data, error } = await query;
-        if (!error && data) tasks = data;
+        if (!error && data) {
+          tasks = data;
+          if (!statusFilter) {
+            this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify(data));
+          }
+        }
       } catch (e) {
         console.warn('Fallback to local tasks:', e);
       }
@@ -750,17 +1030,23 @@ class DataService {
 
     if (this.isSupabaseAvailable()) {
       try {
-        await supabase.from('pending_tasks').upsert({
+        const cleanPayload = {
           id: task.id,
-          handover_id: task.handover_id,
+          handover_id: task.handover_id || null,
           task_type: task.task_type,
           description: task.description,
           priority: task.priority,
           status: task.status,
-          assigned_to: task.assigned_to,
-          followup_notes: task.followup_notes,
+          assigned_to: task.assigned_to || null,
+          followup_notes: task.followup_notes || '',
           created_by: task.created_by,
-        });
+        };
+        const { error } = await supabase.from('pending_tasks').upsert(cleanPayload);
+        if (error) {
+          console.warn('Supabase upsert task warning:', error.message);
+        } else {
+          this.updateStatus({ connected: true, lastSynced: new Date() });
+        }
       } catch (err) {
         console.warn('Supabase upsert task failed:', err);
       }
@@ -771,6 +1057,7 @@ class DataService {
       status: task.status,
     });
 
+    this.broadcastChange('pending_tasks', idx >= 0 ? 'UPDATE' : 'INSERT', task);
     return task;
   }
 
@@ -778,7 +1065,11 @@ class DataService {
   public async getAuditLogs(): Promise<AuditLog[]> {
     if (this.isSupabaseAvailable()) {
       try {
-        const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50);
+        const { data, error } = await supabase
+          .from('audit_logs')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50);
         if (!error && data) return data;
       } catch (e) {
         console.warn('Fallback to local audit logs:', e);
@@ -792,7 +1083,7 @@ class DataService {
     try {
       const logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS) || '[]');
       const newLog: AuditLog = {
-        id: `audit-${Date.now()}`,
+        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         user_id: userId,
         action,
         target_table: targetTable,
@@ -804,7 +1095,19 @@ class DataService {
       this.safeLocalStorageSet(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(logs.slice(0, 100)));
 
       if (this.isSupabaseAvailable()) {
-        supabase.from('audit_logs').insert([newLog]).then();
+        supabase
+          .from('audit_logs')
+          .insert([
+            {
+              id: newLog.id,
+              user_id: newLog.user_id,
+              action: newLog.action,
+              target_table: newLog.target_table,
+              target_id: newLog.target_id,
+              changes: newLog.changes,
+            },
+          ])
+          .then();
       }
     } catch (e) {
       console.warn('Log audit error:', e);
@@ -812,12 +1115,28 @@ class DataService {
   }
 
   // --- SHIFT SWAPS (TUKAR SHIFT) ---
-  public async getShiftSwaps(): Promise<ShiftSwap[]> {
+  public async getShiftSwaps(forceRefresh = false): Promise<ShiftSwap[]> {
     let swaps: ShiftSwap[] = [];
-    const local = localStorage.getItem(STORAGE_KEYS.SHIFT_SWAPS);
-    if (local) {
-      swaps = JSON.parse(local);
+
+    if (this.isSupabaseAvailable()) {
+      try {
+        const { data, error } = await supabase.from('shift_swaps').select('*').order('created_at', { ascending: false });
+        if (!error && data) {
+          swaps = data;
+          this.safeLocalStorageSet(STORAGE_KEYS.SHIFT_SWAPS, JSON.stringify(data));
+        }
+      } catch (e) {
+        console.warn('Fallback to local shift swaps:', e);
+      }
     }
+
+    if (swaps.length === 0) {
+      const local = localStorage.getItem(STORAGE_KEYS.SHIFT_SWAPS);
+      if (local) {
+        swaps = JSON.parse(local);
+      }
+    }
+
     const [allProfiles, allShifts] = await Promise.all([this.getProfiles(), this.getShifts()]);
     return swaps.map((s) => ({
       ...s,
@@ -834,12 +1153,40 @@ class DataService {
     const updated = idx >= 0 ? all.map((s) => (s.id === swap.id ? swap : s)) : [swap, ...all];
     this.safeLocalStorageSet(STORAGE_KEYS.SHIFT_SWAPS, JSON.stringify(updated));
 
+    if (this.isSupabaseAvailable()) {
+      try {
+        const cleanPayload = {
+          id: swap.id,
+          requester_id: swap.requester_id,
+          target_profile_id: swap.target_profile_id,
+          shift_date: swap.shift_date,
+          shift_id: swap.shift_id,
+          target_date: swap.target_date || null,
+          target_shift_id: swap.target_shift_id || null,
+          reason: swap.reason,
+          status: swap.status,
+          approved_by: swap.approved_by || null,
+          approved_at: swap.approved_at || null,
+          whatsapp_sent: !!swap.whatsapp_sent,
+        };
+        const { error } = await supabase.from('shift_swaps').upsert(cleanPayload);
+        if (error) {
+          console.warn('Supabase upsert swap warning:', error.message);
+        } else {
+          this.updateStatus({ connected: true, lastSynced: new Date() });
+        }
+      } catch (err) {
+        console.warn('Supabase upsert swap failed:', err);
+      }
+    }
+
     this.logAudit(this.getActiveUserId(), idx >= 0 ? 'UPDATE_TUKAR_SHIFT' : 'CREATE_TUKAR_SHIFT', 'shift_swaps', swap.id, {
       date: swap.shift_date,
       requester: swap.requester_id,
       target: swap.target_profile_id,
     });
 
+    this.broadcastChange('shift_swaps', idx >= 0 ? 'UPDATE' : 'INSERT', swap);
     return swap;
   }
 
@@ -854,7 +1201,7 @@ class DataService {
 
     await this.saveShiftSwap(swap);
 
-    // If approved, automatically update shift assignment on that date!
+    // If approved, automatically update shift assignment on that date
     if (status === 'approved') {
       const assignments = await this.getAssignments({ date: swap.shift_date });
       const existingAssign = assignments.find(
@@ -870,6 +1217,40 @@ class DataService {
     }
 
     return true;
+  }
+
+  /**
+   * Force full bidirectional sync across all collections
+   */
+  public async syncAll(): Promise<{ success: boolean; message: string }> {
+    if (!this.isSupabaseAvailable()) {
+      return { success: false, message: 'Koneksi Supabase belum terkonfigurasi' };
+    }
+
+    try {
+      this.updateStatus({ channelStatus: 'CONNECTING' });
+      await Promise.all([
+        this.getProfiles(true),
+        this.getShifts(true),
+        this.getAssignments(undefined, true),
+        this.getHandovers(undefined, true),
+        this.getPendingTasks(undefined, true),
+        this.getShiftSwaps(true),
+      ]);
+
+      this.updateStatus({
+        connected: true,
+        channelStatus: 'SUBSCRIBED',
+        lastSynced: new Date(),
+        error: null,
+      });
+
+      this.notifyListeners({ table: 'ALL', action: 'SYNC' });
+      return { success: true, message: 'Semua data berhasil disinkronkan secara realtime dengan Supabase' };
+    } catch (err: any) {
+      this.updateStatus({ connected: false, error: err.message });
+      return { success: false, message: err.message || 'Gagal menyinkronkan data' };
+    }
   }
 
   // Clear or reset local data to defaults

@@ -59,6 +59,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     loadData();
 
+    // Subscribe to realtime profile updates across all staff
+    const unsubscribeRealtime = dataService.subscribe((event) => {
+      if (event.table === 'profiles' || event.table === 'ALL') {
+        loadData();
+      }
+    });
+
     if (supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event: any, session: any) => {
         if (session?.user) {
@@ -72,8 +79,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
       });
-      return () => subscription.unsubscribe();
+      return () => {
+        subscription.unsubscribe();
+        unsubscribeRealtime();
+      };
     }
+
+    return () => unsubscribeRealtime();
   }, []);
 
   const switchProfile = async (profileId: string) => {

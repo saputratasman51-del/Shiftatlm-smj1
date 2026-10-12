@@ -68,6 +68,20 @@ export default function TukarShift() {
 
   useEffect(() => {
     loadData();
+
+    // Subscribe to realtime updates for shift swaps and schedules
+    const unsubscribe = dataService.subscribe((event) => {
+      if (
+        event.table === 'shift_swaps' ||
+        event.table === 'shift_assignments' ||
+        event.table === 'profiles' ||
+        event.table === 'ALL'
+      ) {
+        loadData();
+      }
+    });
+
+    return () => unsubscribe();
   }, [activeProfile]);
 
   const handleOpenModal = () => {

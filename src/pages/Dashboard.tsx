@@ -204,7 +204,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadDashboardData();
-  }, [activeProfile.id]);
+
+    // Subscribe to realtime updates across all devices
+    const unsubscribe = dataService.subscribe(() => {
+      loadDashboardData();
+      dataService.getProfiles().then(setAllProfilesList);
+      dataService.getAssignments({ month: selectedMonthForStaff }).then(setMonthlyAssignments);
+    });
+
+    return () => unsubscribe();
+  }, [activeProfile.id, selectedMonthForStaff]);
 
   return (
     <div className="space-y-5 animate-fade-in">

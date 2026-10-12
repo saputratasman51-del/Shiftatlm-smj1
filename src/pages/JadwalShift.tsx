@@ -136,6 +136,21 @@ export default function JadwalShift() {
 
   useEffect(() => {
     loadData();
+
+    // Subscribe to realtime updates across all devices
+    const unsubscribe = dataService.subscribe((event) => {
+      if (
+        event.table === 'shift_assignments' ||
+        event.table === 'shifts' ||
+        event.table === 'profiles' ||
+        event.table === 'shift_swaps' ||
+        event.table === 'ALL'
+      ) {
+        loadData();
+      }
+    });
+
+    return () => unsubscribe();
   }, [selectedMonth]);
 
   // Filtered assignments

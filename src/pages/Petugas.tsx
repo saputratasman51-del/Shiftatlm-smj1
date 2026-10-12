@@ -58,6 +58,15 @@ export default function Petugas() {
 
   useEffect(() => {
     loadProfiles();
+
+    // Subscribe to realtime updates for registered staff
+    const unsubscribe = dataService.subscribe((event) => {
+      if (event.table === 'profiles' || event.table === 'ALL') {
+        loadProfiles();
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const filteredProfiles = profiles.filter((p) => {

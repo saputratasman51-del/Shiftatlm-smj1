@@ -22,6 +22,7 @@ import { Avatar } from './Avatar';
 import { NotificationBell } from './NotificationBell';
 import { TodayShiftAlarmModal } from './TodayShiftAlarmModal';
 import { OfflineIndicator } from './OfflineIndicator';
+import { RealtimeStatusIndicator } from './RealtimeStatusIndicator';
 import { pushNotificationService } from '../services/pushNotificationService';
 
 const LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/6/6a/Lambang_Daerah_Kab._Kayong_Utara.png';
@@ -111,6 +112,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <div className="flex items-center gap-2">
             <NotificationBell />
           </div>
+        </div>
+
+        {/* Realtime Supabase Connection Status */}
+        <div className="px-4 py-2 border-b border-slate-800/60 bg-slate-950/20 flex items-center justify-between">
+          <RealtimeStatusIndicator />
         </div>
 
         {/* Navigation list */}
@@ -222,8 +228,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         </div>
 
-        {/* Right side: NotificationBell & Profile switch toggle */}
-        <div className="flex items-center gap-2">
+        {/* Right side: Realtime status, NotificationBell & Profile switch toggle */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <RealtimeStatusIndicator compact />
           <NotificationBell />
           <div className="text-right hidden xs:block">
             <span className="font-mono text-xs font-bold text-teal-300 tabular-nums">{currentTime}</span>

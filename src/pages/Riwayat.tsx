@@ -65,6 +65,20 @@ export default function Riwayat() {
 
   useEffect(() => {
     loadData();
+
+    // Subscribe to realtime updates for handovers and audit logs
+    const unsubscribe = dataService.subscribe((event) => {
+      if (
+        event.table === 'handovers' ||
+        event.table === 'audit_logs' ||
+        event.table === 'profiles' ||
+        event.table === 'ALL'
+      ) {
+        loadData();
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const filteredHandovers = handovers.filter((h) => {

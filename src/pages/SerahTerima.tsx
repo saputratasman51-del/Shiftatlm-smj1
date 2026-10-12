@@ -197,6 +197,25 @@ export default function SerahTerima() {
       }
     };
     initData();
+
+    // Subscribe to realtime updates for handovers
+    const unsubscribe = dataService.subscribe((event) => {
+      if (event.table === 'handovers' || event.table === 'ALL') {
+        if (handoverIdParam) {
+          dataService.getHandoverById(handoverIdParam).then((ho) => {
+            if (ho) {
+              setHandoverStatus(ho.status);
+              setStatusLogs(ho.status_logs || []);
+              if (ho.categories_data) setCategoryDataMap(ho.categories_data);
+              if (ho.lab_conditions) setLabConditions(ho.lab_conditions);
+              if (ho.pending_tasks) setPendingTasksList(ho.pending_tasks);
+            }
+          });
+        }
+      }
+    });
+
+    return () => unsubscribe();
   }, [handoverIdParam]);
 
   // Update category field
