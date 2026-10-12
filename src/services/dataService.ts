@@ -142,6 +142,17 @@ export const INITIAL_PROFILES: UserProfile[] = [
     password: '123',
     is_active: true,
   },
+  {
+    id: 'user-1791788423659',
+    full_name: 'Andi Saputra, S.Tr.Kes',
+    nip_str: '199502152020121005',
+    role: 'admin',
+    position: 'Administrator Laboratorium / ATLM',
+    phone: '081234567890',
+    avatar_url: '/src/assets/images/avatar_tasman_1791739900476.jpg',
+    password: '123',
+    is_active: true,
+  },
 ];
 
 // Local storage key constants
@@ -417,6 +428,16 @@ class DataService {
               updated = true;
             }
           }
+          if (
+            p.id === 'user-1791788423659' ||
+            p.full_name.toLowerCase().includes('andi saputra')
+          ) {
+            if (role !== 'admin') {
+              role = 'admin';
+              position = 'Administrator Laboratorium / ATLM';
+              updated = true;
+            }
+          }
           let av = p.avatar_url;
           if (av && av.startsWith('data:') && av.length > 25000) {
             av = undefined;
@@ -507,12 +528,17 @@ class DataService {
         await supabase.from('handover_categories').upsert(INITIAL_CATEGORIES);
       }
 
-      // Ensure Budi is updated to admin role in Supabase profiles
+      // Ensure Budi and Andi Saputra are updated to admin role in Supabase profiles
       try {
         await supabase
           .from('profiles')
           .update({ role: 'admin', position: 'Administrator Laboratorium / ATLM' })
           .eq('id', 'user-staff-2');
+
+        await supabase
+          .from('profiles')
+          .update({ role: 'admin', position: 'Administrator' })
+          .or('id.eq.user-1791788423659,full_name.ilike.%Andi Saputra%');
       } catch (err) {
         // ignore if not yet migrated
       }
