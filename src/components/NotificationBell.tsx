@@ -151,14 +151,14 @@ export function NotificationBell() {
 
       {isOpen && (
         <>
-          {/* Mobile backdrop overlay to prevent clipping and dismiss easily */}
+          {/* Backdrop overlay for all devices to prevent clipping and dismiss easily */}
           <div
-            className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs z-40 sm:hidden animate-fade-in"
+            className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs z-40 animate-fade-in"
             onClick={() => setIsOpen(false)}
           />
 
-          {/* Responsive Notification Popover: bounded on mobile phones, dropdown on desktop */}
-          <div className="fixed inset-x-3.5 top-16 max-h-[85vh] max-w-lg mx-auto sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2.5 sm:mx-0 sm:w-[480px] sm:max-h-[580px] bg-white rounded-2xl shadow-2xl border border-slate-200/90 z-50 overflow-hidden animate-scale-up text-slate-800 flex flex-col">
+          {/* Centered and compact notification popover for mobile, tablet, and PC */}
+          <div className="fixed inset-x-4 top-16 max-h-[80vh] max-w-sm mx-auto sm:absolute sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:top-full sm:mt-2.5 sm:w-[400px] sm:max-h-[500px] bg-white rounded-2xl shadow-2xl border border-slate-200/90 z-50 overflow-hidden animate-scale-up text-slate-800 flex flex-col">
             {/* Header */}
             <div className="p-3.5 sm:p-4 bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950 text-white border-b border-slate-800 shrink-0">
               <div className="flex items-center justify-between gap-2">
