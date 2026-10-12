@@ -16,11 +16,17 @@ import {
   ChevronRight,
   ShieldAlert,
   Table,
+  Sun,
+  Heart,
+  Volume2,
+  BellRing,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString } from '../services/dataService';
 import { Shift, ShiftAssignment, UserProfile } from '../types';
 import { useToast } from '../components/Toast';
+import { playAlarmSound } from '../utils/alarmSound';
 
 export default function JadwalShift() {
   const { activeProfile, isAdmin } = useAuth();
@@ -116,6 +122,18 @@ export default function JadwalShift() {
     return days;
   };
 
+  // Holiday Alarm Modal state (for off-duty staff opening schedule)
+  const [isHolidayToday, setIsHolidayToday] = useState(false);
+  const [showHolidayModal, setShowHolidayModal] = useState(false);
+  const [hasTriggeredHolidayAlarm, setHasTriggeredHolidayAlarm] = useState(false);
+
+  const todayDateStr = getPontianakDateString();
+
+  const handleOpenHolidayModal = () => {
+    setShowHolidayModal(true);
+    playAlarmSound('holiday');
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -127,6 +145,23 @@ export default function JadwalShift() {
       setAssignments(allAssignments);
       setShifts(allShifts);
       setProfiles(allProfiles);
+
+      // Check if logged in staff is off duty today
+      const myTodayShift = allAssignments.find(
+        (a) => a.profile_id === activeProfile.id && a.shift_date === todayDateStr && a.status !== 'cancelled'
+      );
+      const isOffDuty = !myTodayShift;
+      setIsHolidayToday(isOffDuty);
+
+      if (isOffDuty && !hasTriggeredHolidayAlarm) {
+        setHasTriggeredHolidayAlarm(true);
+        const storageKey = `holiday_schedule_alarm_${activeProfile.id}_${todayDateStr}`;
+        if (!sessionStorage.getItem(storageKey)) {
+          setShowHolidayModal(true);
+          sessionStorage.setItem(storageKey, 'true');
+          playAlarmSound('holiday');
+        }
+      }
     } catch (err) {
       console.error('Error loading schedule:', err);
     } finally {
@@ -314,6 +349,44 @@ export default function JadwalShift() {
           )}
         </div>
       </div>
+
+      {/* =========================================================================
+          BANNER LIBUR PETUGAS (JIKA PETUGAS LIBUR HARI INI)
+      ========================================================================= */}
+      {isHolidayToday && (
+        <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50 border border-emerald-300 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3 animate-fade-in w-full">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
+              <Sun className="w-6 h-6 animate-spin-slow text-amber-200" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full border border-emerald-300">
+                  Status Anda Hari Ini: Libur
+                </span>
+                <span className="text-xs text-slate-500 font-mono hidden sm:inline">
+                  {todayDateStr}
+                </span>
+              </div>
+              <h2 className="text-sm sm:text-base font-extrabold text-emerald-950 mt-0.5 truncate">
+                Selamat berlibur bersama keluarga tercinta
+              </h2>
+              <p className="text-xs text-emerald-800 mt-0.5 line-clamp-1">
+                Halo {activeProfile.full_name}, Anda tidak memiliki jadwal dinas jaga hari ini. Nikmati waktu istirahat bersama keluarga!
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleOpenHolidayModal}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-700/20 transition shrink-0 active:scale-95 cursor-pointer"
+            title="Buka Popup & Bunyikan Alarm Libur"
+          >
+            <BellRing className="w-4 h-4 text-amber-300 animate-bounce" />
+            <span>Bunyikan Alarm Libur</span>
+          </button>
+        </div>
+      )}
 
       {/* =========================================================================
           FILTERS & SEARCH BAR
@@ -962,6 +1035,84 @@ export default function JadwalShift() {
                 className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2.5 rounded-xl transition-colors"
               >
                 Batal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL UCAPAN ALARM LIBUR: "Selamat berlibur bersama keluarga tercinta"
+      ========================================================================= */}
+      {showHolidayModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-emerald-200 relative overflow-hidden animate-scale-up text-center">
+            {/* Top decorative gradient bar */}
+            <div className="absolute top-0 left-0 right-0 h-2.5 bg-gradient-to-r from-emerald-400 via-teal-500 to-amber-400" />
+
+            <div className="flex justify-end -mt-1 -mr-1">
+              <button
+                onClick={() => setShowHolidayModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors cursor-pointer"
+                aria-label="Tutup"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Festive Holiday Graphic */}
+            <div className="relative w-20 h-20 mx-auto my-2">
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-emerald-500 via-teal-500 to-cyan-500 text-white flex items-center justify-center shadow-xl shadow-emerald-500/30">
+                <Sun className="w-10 h-10 text-amber-200 animate-spin-slow" />
+              </div>
+              <div className="absolute -top-1 -right-1 w-8 h-8 rounded-full bg-rose-500 text-white flex items-center justify-center shadow-md animate-pulse">
+                <Heart className="w-4 h-4 fill-white" />
+              </div>
+            </div>
+
+            {/* Badge */}
+            <div className="mt-2 mb-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-900 border border-emerald-300 px-3 py-1 rounded-full">
+                Status Hari Ini: Libur / Lepas Dinas
+              </span>
+            </div>
+
+            {/* Main Required Sentence */}
+            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight mt-2 leading-snug">
+              Selamat berlibur bersama keluarga tercinta
+            </h2>
+
+            {/* Personalized Subtext */}
+            <p className="text-xs text-slate-600 mt-2 leading-relaxed px-2">
+              Halo <span className="font-bold text-slate-900">{activeProfile.full_name}</span>, hari ini Anda tidak memiliki jadwal dinas jaga di Laboratorium RSUD Sultan Muhammad Jamaludin I.
+            </p>
+
+            {/* Warm Box */}
+            <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-4 text-xs text-emerald-950 text-left my-4 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>Pesan Pengingat Khusus:</span>
+              </div>
+              <p className="text-[11px] text-emerald-800 leading-relaxed">
+                Manfaatkan waktu istirahat hari ini untuk memulihkan kebugaran, menjaga kesehatan fisik &amp; mental, serta menikmati kebersamaan berharga bersama keluarga tercinta di rumah.
+              </p>
+            </div>
+
+            {/* Audio Replay Button & Close Action */}
+            <div className="space-y-2">
+              <button
+                onClick={() => playAlarmSound('holiday')}
+                className="w-full py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Volume2 className="w-4 h-4 text-teal-600 animate-pulse" />
+                <span>Putar Ulang Nada Alarm Libur</span>
+              </button>
+
+              <button
+                onClick={() => setShowHolidayModal(false)}
+                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-bold shadow-lg shadow-teal-900/25 transition cursor-pointer"
+              >
+                Mengerti &amp; Lihat Jadwal Dinas
               </button>
             </div>
           </div>

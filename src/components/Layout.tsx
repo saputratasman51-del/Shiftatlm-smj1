@@ -236,26 +236,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         </div>
 
-        {/* Right side: Admin shortcut (if admin), PWA install, Realtime status, NotificationBell & Menu toggle */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Quick Admin Settings direct button on mobile header */}
-          {isAdmin && (
-            <NavLink
-              to="/admin"
-              className={({ isActive }) =>
-                `flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
-                  isActive
-                    ? 'bg-amber-400 text-slate-950 shadow-amber-400/40 ring-1 ring-amber-300'
-                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
-                }`
-              }
-              title="Pengaturan Administrator"
-            >
-              <Settings className="w-3.5 h-3.5" />
-              <span>Admin</span>
-            </NavLink>
-          )}
-
+        {/* Right side: PWA install, Realtime status, NotificationBell & Menu toggle */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <PWAInstallButton compact />
           <RealtimeStatusIndicator compact />
           <NotificationBell />
@@ -263,10 +245,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <button
             onClick={() => setMobileDrawerOpen(true)}
             aria-label="Buka Menu & Profil Petugas"
-            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 p-1.5 rounded-xl border border-slate-700 transition-colors"
+            className={`flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 p-1.5 rounded-xl border transition-colors ${
+              isAdmin
+                ? 'border-amber-500/50 bg-amber-950/20 hover:border-amber-400'
+                : 'border-slate-700'
+            }`}
+            title={isAdmin ? 'Menu Petugas & Pengaturan Admin' : 'Menu & Profil Petugas'}
           >
             <Avatar profile={activeProfile} size="xs" />
-            <Menu className="w-3.5 h-3.5 text-slate-300" />
+            <Menu className={`w-3.5 h-3.5 ${isAdmin ? 'text-amber-300' : 'text-slate-300'}`} />
           </button>
         </div>
       </header>
