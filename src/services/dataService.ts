@@ -81,7 +81,7 @@ export const INITIAL_SHIFTS: Shift[] = [
 export const AVATAR_PRESETS = [
   { id: 'av-1', name: 'Tasman (Admin/Ka. Lab)', url: '/src/assets/images/avatar_tasman_1791739900476.jpg' },
   { id: 'av-2', name: 'Siti (PJ Shift / Hijab)', url: '/src/assets/images/avatar_siti_1791739920784.jpg' },
-  { id: 'av-3', name: 'Budi (ATLM Pelaksana)', url: '/src/assets/images/avatar_budi_1791739937453.jpg' },
+  { id: 'av-3', name: 'Budi (Admin / ATLM)', url: '/src/assets/images/avatar_budi_1791739937453.jpg' },
   { id: 'av-4', name: 'Nurul (Bank Darah / Hijab)', url: '/src/assets/images/avatar_nurul_1791739951376.jpg' },
   { id: 'av-5', name: 'Ahmad (ATLM Flebotomi)', url: '/src/assets/images/avatar_ahmad_1791739968784.jpg' },
 ];
@@ -113,8 +113,8 @@ export const INITIAL_PROFILES: UserProfile[] = [
     id: 'user-staff-2',
     full_name: 'Budi Santoso, A.Md.Kes',
     nip_str: '19941120 202001 1 006',
-    role: 'staff',
-    position: 'ATLM Pelaksana',
+    role: 'admin',
+    position: 'Administrator Laboratorium / ATLM',
     phone: '085245678123',
     avatar_url: '/src/assets/images/avatar_budi_1791739937453.jpg',
     password: '123',
@@ -408,6 +408,15 @@ class DataService {
         const stored: UserProfile[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PROFILES) || '[]');
         let updated = false;
         const patched = stored.map((p) => {
+          let role = p.role;
+          let position = p.position;
+          if (p.id === 'user-staff-2' || p.full_name.includes('Budi Santoso')) {
+            if (role !== 'admin') {
+              role = 'admin';
+              position = 'Administrator Laboratorium / ATLM';
+              updated = true;
+            }
+          }
           let av = p.avatar_url;
           if (av && av.startsWith('data:') && av.length > 25000) {
             av = undefined;
@@ -417,10 +426,10 @@ class DataService {
             const match = INITIAL_PROFILES.find((init) => init.id === p.id);
             if (match?.avatar_url) {
               updated = true;
-              return { ...p, avatar_url: match.avatar_url };
+              return { ...p, role, position, avatar_url: match.avatar_url };
             }
           }
-          return { ...p, avatar_url: av };
+          return { ...p, role, position, avatar_url: av };
         });
         if (updated) {
           this.safeLocalStorageSet(STORAGE_KEYS.PROFILES, JSON.stringify(patched));
@@ -496,6 +505,16 @@ class DataService {
       if (!catErr && catData && catData.length === 0) {
         console.log('Seeding initial categories to Supabase...');
         await supabase.from('handover_categories').upsert(INITIAL_CATEGORIES);
+      }
+
+      // Ensure Budi is updated to admin role in Supabase profiles
+      try {
+        await supabase
+          .from('profiles')
+          .update({ role: 'admin', position: 'Administrator Laboratorium / ATLM' })
+          .eq('id', 'user-staff-2');
+      } catch (err) {
+        // ignore if not yet migrated
       }
     } catch (e) {
       console.warn('Initial Supabase seeding check:', e);
