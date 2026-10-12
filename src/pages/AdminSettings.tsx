@@ -142,17 +142,27 @@ export default function AdminSettings() {
     showToast('Hero Direset', 'Gambar hero dikembalikan ke default.');
   };
 
-  const handleHeroFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleHeroFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const res = event.target?.result as string;
-      if (res) {
-        setHeroInputUrl(res);
-      }
-    };
-    reader.readAsDataURL(file);
+
+    showToast('Mengunggah...', 'Mengunggah gambar ke Supabase Storage...', 'info');
+    const publicUrl = await dataService.uploadHeroImageToSupabase(file);
+    if (publicUrl) {
+      setHeroInputUrl(publicUrl);
+      dataService.setHeroImage(publicUrl);
+      showToast('Berhasil Diunggah', 'Gambar hero berhasil diunggah ke Supabase Storage.');
+    } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const res = event.target?.result as string;
+        if (res) {
+          setHeroInputUrl(res);
+          showToast('Dimuat Lokal', 'Gambar dimuat secara lokal (Pastikan bucket shift-atlm-assets siap di Supabase).');
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   return (

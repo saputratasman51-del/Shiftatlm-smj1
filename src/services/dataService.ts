@@ -1374,6 +1374,30 @@ class DataService {
     this.safeLocalStorageSet('shift_atlm_hero_image', url);
   }
 
+  public async uploadHeroImageToSupabase(file: File): Promise<string | null> {
+    if (!supabase) return null;
+    try {
+      const fileName = `hero_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const { error } = await supabase.storage
+        .from('shift-atlm-assets')
+        .upload(fileName, file, { cacheControl: '3600', upsert: true });
+
+      if (error) {
+        console.warn('Supabase storage upload error:', error.message);
+        return null;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from('shift-atlm-assets')
+        .getPublicUrl(fileName);
+
+      return publicUrlData?.publicUrl || null;
+    } catch (e) {
+      console.error('Error uploading hero image to Supabase:', e);
+      return null;
+    }
+  }
+
   // Clear or reset local data to defaults
   public resetToDefaultSeed() {
     localStorage.removeItem(STORAGE_KEYS.PROFILES);
