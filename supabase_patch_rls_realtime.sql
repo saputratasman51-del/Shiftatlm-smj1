@@ -135,3 +135,13 @@ BEGIN
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE shift_swaps; EXCEPTION WHEN OTHERS THEN NULL; END;
   BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE audit_logs; EXCEPTION WHEN OTHERS THEN NULL; END;
 END $$;
+
+-- LANGKAH 8: PERBARUI ROLE BUDI SANTOSO & ANDI SAPUTRA SEBAGAI ADMINISTRATOR / ADMIN
+UPDATE profiles 
+SET role = 'admin', position = 'Administrator Laboratorium / ATLM' 
+WHERE id = 'user-staff-2' OR full_name ILIKE '%Budi Santoso%';
+
+UPDATE profiles 
+SET role = 'admin', position = 'Administrator Laboratorium / ATLM' 
+WHERE id = 'user-1791788423659' OR full_name ILIKE '%Andi Saputra%';
+

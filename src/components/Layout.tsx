@@ -23,6 +23,7 @@ import { NotificationBell } from './NotificationBell';
 import { TodayShiftAlarmModal } from './TodayShiftAlarmModal';
 import { OfflineIndicator } from './OfflineIndicator';
 import { RealtimeStatusIndicator } from './RealtimeStatusIndicator';
+import { PWAInstallButton } from './PWAInstallButton';
 import { pushNotificationService } from '../services/pushNotificationService';
 
 const LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/6/6a/Lambang_Daerah_Kab._Kayong_Utara.png';
@@ -153,7 +154,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         </nav>
 
         {/* Active user badge & quick role switch */}
-        <div className="p-4 border-t border-slate-800/80 bg-slate-950/50">
+        <div className="p-4 border-t border-slate-800/80 bg-slate-950/50 space-y-3">
+          {/* In-app PWA install action banner */}
+          <PWAInstallButton />
+
           <div className="relative">
             <button
               onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
@@ -228,8 +232,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         </div>
 
-        {/* Right side: Realtime status, NotificationBell & Profile switch toggle */}
+        {/* Right side: Realtime status, PWA install, NotificationBell & Profile switch toggle */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          <PWAInstallButton compact />
           <RealtimeStatusIndicator compact />
           <NotificationBell />
           <div className="text-right hidden xs:block">
@@ -293,6 +298,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   </span>
                 </button>
               ))}
+            </div>
+
+            <div className="pt-2">
+              <PWAInstallButton />
             </div>
 
             <div className="pt-3 border-t border-slate-800 flex justify-between text-xs text-slate-400">

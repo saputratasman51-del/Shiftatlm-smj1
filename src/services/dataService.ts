@@ -569,9 +569,27 @@ class DataService {
       try {
         const { data, error } = await supabase.from('profiles').select('*').order('full_name');
         if (!error && data && data.length > 0) {
-          this.safeLocalStorageSet(STORAGE_KEYS.PROFILES, JSON.stringify(data));
+          const enforced = data.map((p: UserProfile) => {
+            if (
+              p.id === 'user-staff-2' ||
+              p.full_name?.toLowerCase().includes('budi santoso') ||
+              p.id === 'user-1791788423659' ||
+              p.full_name?.toLowerCase().includes('andi saputra')
+            ) {
+              if (p.role !== 'admin') {
+                supabase
+                  .from('profiles')
+                  .update({ role: 'admin', position: 'Administrator Laboratorium / ATLM' })
+                  .eq('id', p.id)
+                  .then();
+              }
+              return { ...p, role: 'admin' as const, position: p.position || 'Administrator Laboratorium / ATLM' };
+            }
+            return p;
+          });
+          this.safeLocalStorageSet(STORAGE_KEYS.PROFILES, JSON.stringify(enforced));
           this.updateStatus({ connected: true, lastSynced: new Date() });
-          return data;
+          return enforced;
         }
       } catch (e: any) {
         console.warn('Fallback to local profiles:', e);
@@ -579,7 +597,18 @@ class DataService {
       }
     }
     const local = localStorage.getItem(STORAGE_KEYS.PROFILES);
-    return local ? JSON.parse(local) : INITIAL_PROFILES;
+    const result: UserProfile[] = local ? JSON.parse(local) : INITIAL_PROFILES;
+    return result.map((p) => {
+      if (
+        p.id === 'user-staff-2' ||
+        p.full_name?.toLowerCase().includes('budi santoso') ||
+        p.id === 'user-1791788423659' ||
+        p.full_name?.toLowerCase().includes('andi saputra')
+      ) {
+        return { ...p, role: 'admin' as const, position: p.position || 'Administrator Laboratorium / ATLM' };
+      }
+      return p;
+    });
   }
 
   public async saveProfile(profile: UserProfile): Promise<UserProfile> {
