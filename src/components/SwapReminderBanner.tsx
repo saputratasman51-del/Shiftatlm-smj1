@@ -158,7 +158,7 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
           >
             {/* Top countdown banner stripe */}
             <div
-              className={`px-3.5 py-1.5 flex items-center justify-between text-xs font-bold text-white ${
+              className={`px-3.5 py-2 flex flex-wrap items-center justify-between gap-1.5 text-xs font-bold text-white ${
                 isHariH
                   ? 'bg-gradient-to-r from-amber-600 via-rose-600 to-amber-700 animate-pulse'
                   : isHMinus1
@@ -166,9 +166,9 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
                   : 'bg-gradient-to-r from-slate-800 to-teal-900'
               }`}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                 <Bell className="w-3.5 h-3.5 shrink-0" />
-                <span className="uppercase tracking-wider text-[11px]">
+                <span className="uppercase tracking-wider text-xs font-extrabold">
                   {isHariH
                     ? '🔥 HARI H PERTUKARAN SHIFT (HARI INI)!'
                     : isHMinus1
@@ -176,13 +176,13 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
                     : `📅 PENGINGAT H-${diffDays} PERTUKARAN SHIFT (${diffDays} HARI LAGI)`}
                 </span>
                 {isMeInvolved && (
-                  <span className="bg-white/20 text-white text-[10px] px-2 py-0.2 rounded-full border border-white/30">
+                  <span className="bg-white/20 text-white text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/30">
                     Shift Anda
                   </span>
                 )}
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   onClick={handlePlaySound}
                   title="Bunyikan nada pengingat"
@@ -203,22 +203,22 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
             {/* Banner Main Content */}
             <div className="p-3.5 sm:p-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-2">
+                <div className="space-y-2 min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                     <span className="text-xs font-bold bg-teal-100 text-teal-800 border border-teal-200 px-2.5 py-0.5 rounded-full flex items-center gap-1">
                       <RefreshCw className="w-3 h-3 text-teal-600" />
                       Tukar Shift Disetujui
                     </span>
-                    <span className="text-xs font-mono font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                    <span className="text-xs font-mono font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
                       📅 {swap.shift_date}
                     </span>
-                    <span className="text-xs font-semibold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
+                    <span className="text-xs font-semibold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
                       ⏰ {shiftName} {shiftTime && `(${shiftTime} WIB)`}
                     </span>
                   </div>
 
                   {/* Clarification of who is replacing whom */}
-                  <div className="text-xs sm:text-sm text-slate-800 leading-snug">
+                  <div className="text-xs sm:text-[13px] text-slate-800 leading-relaxed break-words">
                     <span className="font-bold text-teal-900 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200">
                       {targetName}
                     </span>{' '}
@@ -230,14 +230,14 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
                   </div>
 
                   {swap.reason && (
-                    <p className="text-[11px] text-slate-500 italic">
+                    <p className="text-xs text-slate-500 italic bg-white/80 p-1.5 rounded border border-slate-100 break-words leading-relaxed">
                       Alasan: &ldquo;{swap.reason}&rdquo;
                     </p>
                   )}
                 </div>
 
                 {/* Action buttons */}
-                <div className="flex items-center gap-2 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200/60">
+                <div className="flex flex-wrap items-center gap-2 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200/60">
                   <button
                     onClick={(e) => handleShareWhatsAppReminder(swap, e)}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-xs active:scale-95"
