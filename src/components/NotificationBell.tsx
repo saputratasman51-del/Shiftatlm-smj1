@@ -158,7 +158,7 @@ export function NotificationBell() {
           />
 
           {/* Responsive Notification Popover: bounded on mobile phones, dropdown on desktop */}
-          <div className="fixed inset-x-3.5 top-16 sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2.5 max-h-[85vh] sm:max-h-[580px] sm:w-[430px] max-w-lg mx-auto sm:mx-0 bg-white rounded-2xl shadow-2xl border border-slate-200/90 z-50 overflow-hidden animate-scale-up text-slate-800 flex flex-col">
+          <div className="fixed inset-x-2.5 top-14 sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2.5 max-h-[85vh] sm:max-h-[580px] sm:w-[430px] max-w-lg mx-auto sm:mx-0 bg-white rounded-2xl shadow-2xl border border-slate-200/90 z-50 overflow-hidden animate-scale-up text-slate-800 flex flex-col">
             {/* Header */}
             <div className="p-3.5 sm:p-4 bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950 text-white border-b border-slate-800 shrink-0">
               <div className="flex items-center justify-between gap-2">
@@ -304,7 +304,7 @@ export function NotificationBell() {
 
                         {/* Proportional description: Who replaces whom and shift details */}
                         <div className="bg-slate-50/90 rounded-xl p-2.5 border border-slate-200/70 space-y-1.5">
-                          <div className="text-xs sm:text-[13px] text-slate-800 leading-relaxed break-words">
+                          <div className="text-[11px] sm:text-xs text-slate-800 leading-relaxed break-words">
                             <span className="font-bold text-teal-900 bg-teal-100/80 px-1.5 py-0.5 rounded border border-teal-200">
                               {s.target_profile?.full_name || 'Rekan ATLM'}
                             </span>{' '}
@@ -388,7 +388,7 @@ export function NotificationBell() {
                           </span>
                         </div>
 
-                        <div className="text-xs sm:text-[13px] text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100 break-words">
+                        <div className="text-[11px] sm:text-xs text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100 break-words">
                           <p>
                             <strong className="text-teal-900 font-semibold">{s.target_profile?.full_name || 'Rekan ATLM'}</strong>{' '}
                             resmi bertukar dengan{' '}
@@ -452,7 +452,7 @@ export function NotificationBell() {
                             </span>
                           </div>
 
-                          <p className="text-xs sm:text-[13px] text-slate-700 leading-relaxed break-words">
+                          <p className="text-[11px] sm:text-xs text-slate-700 leading-relaxed break-words">
                             <strong className="text-slate-900">{s.requester?.full_name}</strong> mengajukan pertukaran dinas tanggal{' '}
                             <span className="font-mono font-bold text-teal-800 bg-white px-1.5 py-0.5 rounded border border-amber-200">{s.shift_date}</span>.
                           </p>
