@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   RefreshCw,
   Plus,
@@ -17,6 +18,7 @@ import {
   ShieldAlert,
   X,
   Phone,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString } from '../services/dataService';
@@ -26,6 +28,7 @@ import { useToast } from '../components/Toast';
 export default function TukarShift() {
   const { activeProfile, isAdmin } = useAuth();
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const [swaps, setSwaps] = useState<ShiftSwap[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
@@ -163,7 +166,7 @@ export default function TukarShift() {
       <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">Tukar Shift & Integrasi WhatsApp</h1>
+            <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">Tukar Shift &amp; Integrasi WhatsApp</h1>
             <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
               <MessageSquare className="w-3 h-3 text-emerald-600" /> WhatsApp Ready
             </span>
@@ -171,11 +174,31 @@ export default function TukarShift() {
           <p className="text-xs text-slate-500 mt-0.5">
             Ajukan pertukaran jadwal jaga antar petugas ATLM dengan konfirmasi langsung via WhatsApp dan pembaruan riwayat shift otomatis.
           </p>
+
+          {/* Quick jump for mobile */}
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-100 md:hidden">
+            <button
+              onClick={() => navigate('/profil')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition active:scale-95"
+            >
+              <User className="w-3.5 h-3.5 text-teal-600" />
+              <span>Profil Saya</span>
+            </button>
+            {isAdmin && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-semibold border border-amber-200 transition active:scale-95"
+              >
+                <Settings className="w-3.5 h-3.5 text-amber-600" />
+                <span>Pengaturan Admin</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <button
           onClick={handleOpenModal}
-          className="flex items-center gap-1.5 bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all min-h-[40px] self-start md:self-auto"
+          className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all min-h-[42px] w-full sm:w-auto"
         >
           <Plus className="w-4 h-4" />
           <span>Ajukan Tukar Shift</span>

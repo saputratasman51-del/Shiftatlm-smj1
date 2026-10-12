@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   CalendarDays,
@@ -13,6 +13,8 @@ import {
   Menu,
   X,
   ChevronDown,
+  ChevronRight,
+  ArrowRight,
   Building2,
   RefreshCw,
 } from 'lucide-react';
@@ -35,10 +37,12 @@ interface LayoutProps {
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { activeProfile, isAdmin, allProfiles, switchProfile } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(getPontianakTimeString());
   const [currentDateStr, setCurrentDateStr] = useState('');
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [showSimulateList, setShowSimulateList] = useState(false);
 
   // Live clock in Asia/Pontianak & push notification check
   useEffect(() => {
@@ -232,81 +236,290 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         </div>
 
-        {/* Right side: Realtime status, PWA install, NotificationBell & Profile switch toggle */}
+        {/* Right side: Admin shortcut (if admin), PWA install, Realtime status, NotificationBell & Menu toggle */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Quick Admin Settings direct button on mobile header */}
+          {isAdmin && (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) =>
+                `flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
+                  isActive
+                    ? 'bg-amber-400 text-slate-950 shadow-amber-400/40 ring-1 ring-amber-300'
+                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+                }`
+              }
+              title="Pengaturan Administrator"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Admin</span>
+            </NavLink>
+          )}
+
           <PWAInstallButton compact />
           <RealtimeStatusIndicator compact />
           <NotificationBell />
-          <div className="text-right hidden xs:block">
-            <span className="font-mono text-xs font-bold text-teal-300 tabular-nums">{currentTime}</span>
-            <p className="text-[9px] text-slate-400">Asia/Pontianak</p>
-          </div>
+
           <button
-            onClick={() => setMobileDrawerOpen(!mobileDrawerOpen)}
+            onClick={() => setMobileDrawerOpen(true)}
+            aria-label="Buka Menu & Profil Petugas"
             className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 p-1.5 rounded-xl border border-slate-700 transition-colors"
           >
             <Avatar profile={activeProfile} size="xs" />
-            <ChevronDown className="w-3.5 h-3.5 text-slate-300" />
+            <Menu className="w-3.5 h-3.5 text-slate-300" />
           </button>
         </div>
       </header>
 
-      {/* Mobile Profile Switcher Modal */}
+      {/* Mobile Navigation, Profile & Quick-Access Drawer */}
       {mobileDrawerOpen && (
-        <div className="no-print md:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-4 text-white shadow-2xl animate-scale-up">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-teal-400" />
-                <h3 className="font-bold text-sm">Ganti Peran / Petugas</h3>
-              </div>
-              <button
-                onClick={() => setMobileDrawerOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="py-3 space-y-1.5 max-h-64 overflow-y-auto">
-              {allProfiles.map((p) => (
+        <div className="no-print md:hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-md max-h-[90vh] flex flex-col text-white shadow-2xl overflow-hidden animate-scale-up">
+            
+            {/* Drawer Header & Active Profile Info */}
+            <div className="p-4 bg-gradient-to-r from-slate-900 via-teal-950/60 to-slate-900 border-b border-slate-800">
+              <div className="flex items-center justify-between pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+                    Pusat Akses Petugas
+                  </span>
+                </div>
                 <button
-                  key={p.id}
+                  onClick={() => setMobileDrawerOpen(false)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Active Profile Card */}
+              <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-800/80 border border-slate-700/80">
+                <Avatar profile={activeProfile} size="md" showStatus />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-bold text-white truncate">{activeProfile.full_name}</p>
+                    <span
+                      className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded uppercase ${
+                        isAdmin
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          : 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                      }`}
+                    >
+                      {activeProfile.role}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 truncate mt-0.5">{activeProfile.position}</p>
+                  <p className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">
+                    NIP/STR: {activeProfile.nip_str || '199502152020121005'}
+                  </p>
+                </div>
+                <button
                   onClick={() => {
-                    switchProfile(p.id);
+                    navigate('/profil');
                     setMobileDrawerOpen(false);
                   }}
-                  className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-left transition-colors ${
-                    p.id === activeProfile.id
-                      ? 'bg-teal-600/30 border border-teal-500/40 text-teal-200 font-semibold'
-                      : 'hover:bg-slate-800 text-slate-300'
-                  }`}
+                  className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold shadow transition shrink-0"
                 >
-                  <Avatar profile={p} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold truncate">{p.full_name}</p>
-                    <p className="text-[10px] text-slate-400 truncate">{p.position}</p>
-                  </div>
-                  <span
-                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
-                      p.role === 'admin'
-                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                        : 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
-                    }`}
-                  >
-                    {p.role}
-                  </span>
+                  Profil
                 </button>
-              ))}
+              </div>
             </div>
 
-            <div className="pt-2">
-              <PWAInstallButton />
+            {/* Scrollable Menu Items */}
+            <div className="p-4 overflow-y-auto space-y-3 flex-1 text-xs">
+              {/* Highlighted Primary Menus Requested by User */}
+              <div className="space-y-2">
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider px-1">
+                  Menu Utama &amp; Pengaturan:
+                </p>
+
+                {/* 1. Tukar Shift */}
+                <button
+                  onClick={() => {
+                    navigate('/tukar-shift');
+                    setMobileDrawerOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-teal-950/60 to-slate-800/90 border border-teal-500/30 hover:border-teal-400 text-left transition group active:scale-[0.98]"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center shrink-0">
+                      <RefreshCw className="w-5 h-5 text-teal-400 group-hover:rotate-180 transition-transform duration-500" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white group-hover:text-teal-200">Tukar Shift Jaga</h4>
+                      <p className="text-[11px] text-slate-300 mt-0.5">
+                        Ajukan, setujui, &amp; koordinasikan jadwal tukar dinas
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-white" />
+                </button>
+
+                {/* 2. Profil Petugas */}
+                <button
+                  onClick={() => {
+                    navigate('/profil');
+                    setMobileDrawerOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-800/90 border border-slate-700/80 hover:border-teal-500/40 text-left transition group active:scale-[0.98]"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-300 flex items-center justify-center shrink-0">
+                      <User className="w-5 h-5 text-blue-400" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white group-hover:text-teal-200">Profil Saya</h4>
+                      <p className="text-[11px] text-slate-300 mt-0.5">
+                        Ubah foto profil, NIP/STR, no telp, &amp; kata sandi
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-white" />
+                </button>
+
+                {/* 3. Pengaturan Admin (Highlighted prominently for Admins) */}
+                {isAdmin ? (
+                  <button
+                    onClick={() => {
+                      navigate('/admin');
+                      setMobileDrawerOpen(false);
+                    }}
+                    className="w-full flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-amber-950/60 via-slate-800 to-amber-950/40 border border-amber-500/40 hover:border-amber-400 text-left transition group active:scale-[0.98]"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0 ring-1 ring-amber-500/30">
+                        <Settings className="w-5 h-5 text-amber-400 group-hover:rotate-90 transition-transform duration-500" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-white group-hover:text-amber-200">Pengaturan Admin</h4>
+                          <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.2 rounded uppercase">
+                            Admin Only
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-0.5">
+                          Master shift, 17 unit lab, Supabase DB &amp; audit log
+                        </p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-amber-400" />
+                  </button>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-slate-950/40 border border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-slate-500 shrink-0" />
+                    <span>Pengaturan Admin hanya dapat diakses akun berstatus Administrator.</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Other Navigation Shortcuts */}
+              <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider px-1">
+                  Menu Operasional Lainnya:
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      navigate('/jadwal');
+                      setMobileDrawerOpen(false);
+                    }}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-left transition"
+                  >
+                    <CalendarDays className="w-4 h-4 text-teal-400 shrink-0" />
+                    <span className="font-semibold text-slate-200 text-xs">Jadwal Shift</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigate('/serah-terima');
+                      setMobileDrawerOpen(false);
+                    }}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-left transition"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="font-semibold text-slate-200 text-xs">Serah Terima</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigate('/petugas');
+                      setMobileDrawerOpen(false);
+                    }}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-left transition"
+                  >
+                    <Users className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span className="font-semibold text-slate-200 text-xs">Daftar Petugas</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigate('/riwayat');
+                      setMobileDrawerOpen(false);
+                    }}
+                    className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-left transition"
+                  >
+                    <History className="w-4 h-4 text-sky-400 shrink-0" />
+                    <span className="font-semibold text-slate-200 text-xs">Riwayat Operan</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Collapsible Switch Profile (Simulasi) */}
+              <div className="pt-2 border-t border-slate-800">
+                <button
+                  onClick={() => setShowSimulateList(!showSimulateList)}
+                  className="w-full flex items-center justify-between py-1.5 px-1 text-slate-400 hover:text-white transition"
+                >
+                  <span className="text-[11px] font-semibold flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-teal-400" />
+                    Simulasi Akun Petugas ({allProfiles.length} terdaftar)
+                  </span>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showSimulateList ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showSimulateList && (
+                  <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {allProfiles.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          switchProfile(p.id);
+                          setMobileDrawerOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-2.5 p-2 rounded-xl text-left transition-colors ${
+                          p.id === activeProfile.id
+                            ? 'bg-teal-600/30 border border-teal-500/40 text-teal-200 font-semibold'
+                            : 'hover:bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        <Avatar profile={p} size="xs" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold truncate">{p.full_name}</p>
+                          <p className="text-[10px] text-slate-400 truncate">{p.position}</p>
+                        </div>
+                        <span
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                            p.role === 'admin'
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                              : 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                          }`}
+                        >
+                          {p.role}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* In-app PWA install action banner */}
+              <div className="pt-2">
+                <PWAInstallButton />
+              </div>
             </div>
 
-            <div className="pt-3 border-t border-slate-800 flex justify-between text-xs text-slate-400">
-              <span>Waktu Server:</span>
-              <span className="font-mono text-white font-semibold">{currentTime} WIB</span>
+            {/* Drawer Footer */}
+            <div className="p-3 bg-slate-950 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+              <span>Waktu Server (Pontianak):</span>
+              <span className="font-mono text-teal-300 font-semibold">{currentTime} WIB</span>
             </div>
           </div>
         </div>
@@ -388,30 +601,37 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             <span className="text-[10px] font-semibold mt-0.5">Operan</span>
           </NavLink>
 
-          {/* 4. Petugas */}
+          {/* 4. Tukar Shift */}
           <NavLink
-            to="/petugas"
+            to="/tukar-shift"
             className={({ isActive }) =>
               `flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-colors min-h-[48px] ${
                 isActive ? 'text-teal-700 font-bold' : 'text-slate-500 hover:text-slate-800'
               }`
             }
           >
-            <Users className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] tracking-tight">Petugas</span>
+            <RefreshCw className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] tracking-tight">Tukar</span>
           </NavLink>
 
-          {/* 5. Riwayat */}
+          {/* 5. Profil / Admin */}
           <NavLink
-            to="/riwayat"
+            to="/profil"
             className={({ isActive }) =>
-              `flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-colors min-h-[48px] ${
-                isActive ? 'text-teal-700 font-bold' : 'text-slate-500 hover:text-slate-800'
+              `flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-colors min-h-[48px] relative ${
+                isActive || location.pathname === '/admin' ? 'text-teal-700 font-bold' : 'text-slate-500 hover:text-slate-800'
               }`
             }
           >
-            <History className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] tracking-tight">Riwayat</span>
+            <div className="relative">
+              <User className="w-5 h-5 mb-0.5" />
+              {isAdmin && (
+                <span className="absolute -top-0.5 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-white" />
+              )}
+            </div>
+            <span className="text-[10px] tracking-tight">
+              {isAdmin ? 'Profil/Admin' : 'Profil'}
+            </span>
           </NavLink>
         </div>
       </nav>

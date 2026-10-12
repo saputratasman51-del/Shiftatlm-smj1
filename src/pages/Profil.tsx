@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   User,
   Shield,
@@ -15,6 +16,10 @@ import {
   LogOut,
   BellRing,
   Send,
+  Settings,
+  RefreshCw,
+  CalendarDays,
+  ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, AVATAR_PRESETS } from '../services/dataService';
@@ -25,6 +30,7 @@ import { pushNotificationService } from '../services/pushNotificationService';
 export default function Profil() {
   const { activeProfile, isAdmin, allProfiles, switchProfile, refreshProfiles, logout } = useAuth();
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const [editMode, setEditMode] = useState(false);
   const [fullName, setFullName] = useState(activeProfile.full_name);
@@ -136,6 +142,68 @@ export default function Profil() {
             <span>Keluar</span>
           </button>
         </div>
+      </div>
+
+      {/* =========================================================================
+          PINTASAN MENU CEPAT (MUDAH DIAKSES DARI HANDPHONE)
+      ========================================================================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Pintasan Tukar Shift */}
+        <button
+          onClick={() => navigate('/tukar-shift')}
+          className="flex items-center justify-between p-3.5 rounded-2xl bg-white border border-slate-200/90 shadow-sm hover:border-teal-500/50 hover:shadow-md transition text-left group active:scale-[0.99] cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 border border-teal-100 flex items-center justify-center shrink-0">
+              <RefreshCw className="w-5 h-5 text-teal-600 group-hover:rotate-180 transition-transform duration-500" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-slate-900 group-hover:text-teal-700">Tukar Shift Jaga</h4>
+              <p className="text-xs text-slate-500 mt-0.5">Ajukan &amp; pantau pertukaran dinas antar petugas</p>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-teal-600" />
+        </button>
+
+        {/* Pintasan Pengaturan Admin (Jika Admin) / Jadwal (Jika Staff) */}
+        {isAdmin ? (
+          <button
+            onClick={() => navigate('/admin')}
+            className="flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-white border border-amber-300 shadow-sm hover:border-amber-400 hover:shadow-md transition text-left group active:scale-[0.99] cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-700 border border-amber-300 flex items-center justify-center shrink-0">
+                <Settings className="w-5 h-5 text-amber-700 group-hover:rotate-90 transition-transform duration-500" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h4 className="text-sm font-bold text-amber-950 group-hover:text-amber-800">Pengaturan Admin</h4>
+                  <span className="text-[9px] font-bold bg-amber-200 text-amber-900 px-1.5 py-0.2 rounded uppercase">
+                    Admin Only
+                  </span>
+                </div>
+                <p className="text-xs text-amber-800/80 mt-0.5">Master shift, 17 unit lab, Supabase DB &amp; audit</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-amber-600 group-hover:text-amber-800" />
+          </button>
+        ) : (
+          <button
+            onClick={() => navigate('/jadwal')}
+            className="flex items-center justify-between p-3.5 rounded-2xl bg-white border border-slate-200/90 shadow-sm hover:border-teal-500/50 hover:shadow-md transition text-left group active:scale-[0.99] cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center shrink-0">
+                <CalendarDays className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 group-hover:text-blue-700">Jadwal Shift Anda</h4>
+                <p className="text-xs text-slate-500 mt-0.5">Lihat jadwal rotasi dinas dan kalender jaga</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-600" />
+          </button>
+        )}
       </div>
 
       {/* =========================================================================

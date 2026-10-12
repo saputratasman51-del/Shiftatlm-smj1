@@ -19,6 +19,9 @@ import {
   Activity,
   Layers,
   Users,
+  RefreshCw,
+  User,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString, getPontianakTimeString } from '../services/dataService';
@@ -259,39 +262,80 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Quick action buttons row */}
-        <div className="mt-5 pt-4 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <button
-            onClick={() => navigate('/jadwal')}
-            className="flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-white text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-700/60 transition-colors min-h-[44px]"
-          >
-            <Calendar className="w-3.5 h-3.5 text-teal-400" />
-            <span>Lihat Jadwal</span>
-          </button>
+        {/* Quick action buttons row (Fast Access on Mobile & Desktop) */}
+        <div className="mt-5 pt-4 border-t border-slate-800/80 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-teal-300 uppercase tracking-wider flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+              Akses Cepat Menu Mobile &amp; Operasional:
+            </span>
+          </div>
 
-          <button
-            onClick={() => navigate('/serah-terima')}
-            className="flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white text-xs font-bold py-2.5 px-3 rounded-xl shadow-md shadow-teal-950/50 transition-all min-h-[44px]"
-          >
-            <PlusCircle className="w-3.5 h-3.5" />
-            <span>Serah Terima</span>
-          </button>
+          <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-6 gap-2">
+            {/* Tukar Shift */}
+            <button
+              onClick={() => navigate('/tukar-shift')}
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-teal-900/80 to-slate-800 hover:bg-slate-700 text-teal-200 text-xs font-bold py-2.5 px-2.5 rounded-xl border border-teal-500/40 transition-all min-h-[44px] shadow-sm active:scale-95 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+              <span className="truncate">Tukar Shift</span>
+            </button>
 
-          <button
-            onClick={() => navigate('/riwayat')}
-            className="flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-white text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-700/60 transition-colors min-h-[44px]"
-          >
-            <History className="w-3.5 h-3.5 text-blue-400" />
-            <span>Riwayat Operan</span>
-          </button>
+            {/* Profil Petugas */}
+            <button
+              onClick={() => navigate('/profil')}
+              className="flex items-center justify-center gap-2 bg-slate-800/90 hover:bg-slate-700 text-white text-xs font-semibold py-2.5 px-2.5 rounded-xl border border-slate-700/80 transition-colors min-h-[44px] active:scale-95 cursor-pointer"
+            >
+              <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <span className="truncate">Profil Saya</span>
+            </button>
 
-          <button
-            onClick={() => setContactAdminModal(true)}
-            className="flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-white text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-700/60 transition-colors min-h-[44px]"
-          >
-            <MessageCircle className="w-3.5 h-3.5 text-amber-400" />
-            <span>Hubungi Admin</span>
-          </button>
+            {/* Pengaturan Admin (Highlighted if Admin) */}
+            {isAdmin ? (
+              <button
+                onClick={() => navigate('/admin')}
+                className="flex items-center justify-center gap-2 bg-gradient-to-r from-amber-950/80 to-slate-800 hover:bg-slate-700 text-amber-200 text-xs font-bold py-2.5 px-2.5 rounded-xl border border-amber-500/50 transition-all min-h-[44px] shadow-sm ring-1 ring-amber-500/30 active:scale-95 cursor-pointer"
+              >
+                <Settings className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="truncate">Admin Mode</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setContactAdminModal(true)}
+                className="flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-white text-xs font-semibold py-2.5 px-2.5 rounded-xl border border-slate-700/60 transition-colors min-h-[44px] active:scale-95 cursor-pointer"
+              >
+                <MessageCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="truncate">Hubungi Admin</span>
+              </button>
+            )}
+
+            {/* Jadwal */}
+            <button
+              onClick={() => navigate('/jadwal')}
+              className="flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-white text-xs font-semibold py-2.5 px-2.5 rounded-xl border border-slate-700/60 transition-colors min-h-[44px] active:scale-95 cursor-pointer"
+            >
+              <Calendar className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+              <span className="truncate">Jadwal</span>
+            </button>
+
+            {/* Serah Terima (Operan) */}
+            <button
+              onClick={() => navigate('/serah-terima')}
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white text-xs font-bold py-2.5 px-2.5 rounded-xl shadow-md shadow-teal-950/50 transition-all min-h-[44px] active:scale-95 cursor-pointer"
+            >
+              <PlusCircle className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Operan</span>
+            </button>
+
+            {/* Riwayat */}
+            <button
+              onClick={() => navigate('/riwayat')}
+              className="flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-white text-xs font-semibold py-2.5 px-2.5 rounded-xl border border-slate-700/60 transition-colors min-h-[44px] active:scale-95 cursor-pointer"
+            >
+              <History className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <span className="truncate">Riwayat</span>
+            </button>
+          </div>
         </div>
       </div>
 
