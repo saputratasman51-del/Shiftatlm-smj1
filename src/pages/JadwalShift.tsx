@@ -31,6 +31,7 @@ import { Shift, ShiftAssignment, UserProfile } from '../types';
 import { useToast } from '../components/Toast';
 import { playAlarmSound } from '../utils/alarmSound';
 import { SwapReminderBanner } from '../components/SwapReminderBanner';
+import { VoiceAssistant } from '../components/VoiceAssistant';
 
 export default function JadwalShift() {
   const { activeProfile, isAdmin } = useAuth();
@@ -515,6 +516,27 @@ export default function JadwalShift() {
           </button>
         </div>
       )}
+
+      {/* =========================================================================
+          SMART VOICE ASSISTANT FOR SCHEDULE SEARCH
+      ========================================================================= */}
+      <VoiceAssistant
+        activeProfileId={activeProfile.id}
+        activeProfileName={activeProfile.full_name}
+        assignments={assignments}
+        shifts={shifts}
+        onNavigateDate={(dateStr) => {
+          setSelectedMonth(dateStr.slice(0, 7));
+          setViewMode('calendar');
+        }}
+        onSelectMonth={(yearMonth) => {
+          setSelectedMonth(yearMonth);
+          setViewMode('calendar');
+        }}
+        onFilterStaff={(profileId) => {
+          setSelectedStaffFilter(profileId);
+        }}
+      />
 
       {/* =========================================================================
           FILTERS & SEARCH BAR
