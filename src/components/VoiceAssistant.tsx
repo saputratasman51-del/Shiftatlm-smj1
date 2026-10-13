@@ -21,6 +21,11 @@ import {
   Smartphone,
   Radio,
   Loader2,
+  Terminal,
+  Copy,
+  Check,
+  X,
+  Activity,
 } from 'lucide-react';
 import { ShiftAssignment, Shift } from '../types';
 import { dataService, getPontianakDateString } from '../services/dataService';
@@ -29,6 +34,7 @@ import {
   TEST_VOICE_PHRASE,
   primeAudio,
   playMelodicChime,
+  VoiceDiagnosticLog,
 } from '../hooks/useVoiceAssistant';
 
 interface VoiceAssistantProps {
@@ -83,6 +89,8 @@ export function VoiceAssistant({
   const [textInputFallback, setTextInputFallback] = useState('');
   const [showTextFallback, setShowTextFallback] = useState(false);
   const [matchedAssignmentResult, setMatchedAssignmentResult] = useState<ShiftAssignment | null>(null);
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [copiedLogStatus, setCopiedLogStatus] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -92,17 +100,23 @@ export function VoiceAssistant({
     responseMessage,
     speechEnabled,
     isPwa,
+    isRecognitionSupported,
+    isSynthesisSupported,
     errorMessage,
+    availableVoices,
     selectedVoice,
     testAudioStatus,
     testAudioMessage,
     autoplayBlocked,
+    diagnosticLogs,
+    lastErrorCode,
     setAutoplayBlocked,
     setSpeechEnabled,
     setTranscript,
     setResponseMessage,
     setStatus,
     setErrorMessage,
+    clearDiagnosticLogs,
     startListening,
     stopListening,
     speakResponse,
@@ -387,7 +401,7 @@ export function VoiceAssistant({
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
             <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
-            Gagal memutar suara.
+            Gagal memutar suara{lastErrorCode ? ` [${lastErrorCode}]` : '.'}
           </span>
         );
       default:
@@ -544,6 +558,28 @@ export function VoiceAssistant({
           >
             {showTextFallback ? 'Tutup Teks' : 'Ketik Manual'}
           </button>
+
+          {/* Diagnostic Log viewer button */}
+          <button
+            onClick={() => setShowDiagnosticsModal(true)}
+            className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer relative ${
+              lastErrorCode
+                ? 'bg-rose-950/80 border-rose-500/50 text-rose-300 hover:bg-rose-900/80'
+                : 'bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-cyan-300 border-slate-700'
+            }`}
+            title="Buka panel log diagnostik Web Speech API & PWA"
+          >
+            <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Log Diagnostik</span>
+            {diagnosticLogs.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-500/40">
+                {diagnosticLogs.length}
+              </span>
+            )}
+            {lastErrorCode && (
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping absolute -top-1 -right-1" />
+            )}
+          </button>
         </div>
       </div>
 
@@ -558,6 +594,11 @@ export function VoiceAssistant({
                   Uji Coba Pembacaan Suara:
                 </span>
                 {renderTestAudioBadge()}
+                {lastErrorCode && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-500/40">
+                    Kode: {lastErrorCode}
+                  </span>
+                )}
               </div>
               <p className="text-[11px] text-slate-300 mt-0.5 italic">
                 &ldquo;{TEST_VOICE_PHRASE}&rdquo;
@@ -586,6 +627,14 @@ export function VoiceAssistant({
                   >
                     <Volume2 className="w-3 h-3 text-cyan-400" />
                     <span>Tes Speaker (Melodi)</span>
+                  </button>
+                  <button
+                    onClick={() => setShowDiagnosticsModal(true)}
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-cyan-300 text-[11px] font-mono rounded-lg border border-cyan-500/40 transition cursor-pointer flex items-center gap-1"
+                    title="Buka detail log diagnostik error"
+                  >
+                    <Terminal className="w-3 h-3 text-cyan-400" />
+                    <span>Detail Error & Log</span>
                   </button>
                 </div>
               )}
@@ -820,6 +869,240 @@ export function VoiceAssistant({
           &ldquo;Shift hari ini&rdquo;
         </button>
       </div>
+
+      {/* =========================================================================
+          DIAGNOSTIC LOG & PWA TROUBLESHOOTING MODAL
+      ========================================================================= */}
+      {showDiagnosticsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-white animate-scale-in">
+            {/* Modal Header */}
+            <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                  <Terminal className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                    <span>Log Diagnostik Suara & Status PWA</span>
+                    {lastErrorCode && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-500/50">
+                        Error: {lastErrorCode}
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Inspeksi Web Speech API, pelacakan &apos;voiceschanged&apos;, dan mitigasi kebijakan Autoplay PWA
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDiagnosticsModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 overflow-y-auto space-y-4 text-xs">
+              {/* Environment Status Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Mode PWA</span>
+                  <span
+                    className={`font-bold text-xs mt-0.5 block ${
+                      isPwa ? 'text-indigo-300' : 'text-slate-300'
+                    }`}
+                  >
+                    {isPwa ? 'Aktif (Standalone)' : 'Web Browser'}
+                  </span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Speech Synthesis</span>
+                  <span
+                    className={`font-bold text-xs mt-0.5 block ${
+                      isSynthesisSupported ? 'text-teal-300' : 'text-rose-400'
+                    }`}
+                  >
+                    {isSynthesisSupported ? 'Didukung' : 'Tidak Didukung'}
+                  </span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Suara Terdeteksi</span>
+                  <span className="font-bold text-xs mt-0.5 block text-cyan-300">
+                    {availableVoices.length} suara
+                  </span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Error Terakhir</span>
+                  <span
+                    className={`font-mono text-xs mt-0.5 block truncate ${
+                      lastErrorCode ? 'text-rose-400 font-bold' : 'text-slate-400'
+                    }`}
+                  >
+                    {lastErrorCode || 'Nihil'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Active Voice Info */}
+              <div className="p-3 rounded-xl bg-teal-950/30 border border-teal-500/20 flex items-start gap-2 text-[11px] text-teal-200">
+                <Volume2 className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-teal-100">Suara Bahasa Indonesia Terpilih:</span>{' '}
+                  {selectedVoice ? (
+                    <span className="font-mono text-cyan-200">
+                      {selectedVoice.name} ({selectedVoice.lang}) &bull;{' '}
+                      {selectedVoice.localService ? 'Suara Lokal (Offline)' : 'Suara Jaringan (Remote)'}
+                    </span>
+                  ) : (
+                    <span className="text-amber-300 font-medium">
+                      Menggunakan Suara Bawaan Sistem OS (id-ID otomatis)
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Diagnostic Logs Header & Actions */}
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <div className="flex items-center gap-1.5">
+                  <Activity className="w-4 h-4 text-cyan-400" />
+                  <span className="font-bold text-white text-xs">
+                    Riwayat Kejadian Suara ({diagnosticLogs.length}):
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      try {
+                        const payload = {
+                          timestamp: new Date().toISOString(),
+                          isPwa,
+                          isRecognitionSupported,
+                          isSynthesisSupported,
+                          voicesCount: availableVoices.length,
+                          selectedVoice: selectedVoice
+                            ? { name: selectedVoice.name, lang: selectedVoice.lang, localService: selectedVoice.localService }
+                            : null,
+                          lastErrorCode,
+                          logs: diagnosticLogs,
+                        };
+                        navigator.clipboard.writeText(JSON.stringify(payload, null, 2)).then(() => {
+                          setCopiedLogStatus(true);
+                          setTimeout(() => setCopiedLogStatus(false), 2000);
+                        });
+                      } catch (e) {}
+                    }}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-lg border border-slate-700 text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
+                  >
+                    {copiedLogStatus ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Tersalin!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" />
+                        <span>Salin Log</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={clearDiagnosticLogs}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg border border-slate-700 text-[11px] transition cursor-pointer"
+                  >
+                    Bersihkan
+                  </button>
+                </div>
+              </div>
+
+              {/* Logs List */}
+              <div className="max-h-56 overflow-y-auto space-y-1.5 bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-[11px]">
+                {diagnosticLogs.length === 0 ? (
+                  <p className="text-slate-500 italic text-center py-4 font-sans">
+                    Belum ada riwayat aktivitas suara tercatat.
+                  </p>
+                ) : (
+                  diagnosticLogs.map((log) => (
+                    <div
+                      key={log.id}
+                      className={`p-2 rounded-lg border flex flex-col gap-1 ${
+                        log.type === 'error'
+                          ? 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                          : log.type === 'warn'
+                          ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap text-[10px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-500">{log.timestamp}</span>
+                          <span className="px-1.5 py-0.2 rounded bg-slate-800 text-cyan-300 font-bold uppercase">
+                            {log.source}
+                          </span>
+                          {log.errorCode && (
+                            <span className="px-1.5 py-0.2 rounded bg-rose-900/80 text-rose-300 font-bold">
+                              [{log.errorCode}]
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="font-sans text-xs text-slate-100">{log.message}</p>
+                      {log.details && (
+                        <pre className="text-[10px] text-slate-400 overflow-x-auto bg-slate-950/70 p-1.5 rounded mt-0.5 border border-slate-800/60">
+                          {JSON.stringify(log.details, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* PWA & Speech Knowledge Reference */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1.5 text-[11px] text-slate-400">
+                <p className="font-bold text-slate-300 flex items-center gap-1">
+                  <HelpCircle className="w-3.5 h-3.5 text-cyan-400" />
+                  Panduan Perilaku Suara di PWA & Browser Ponsel:
+                </p>
+                <ul className="list-disc list-inside space-y-1 pl-1 text-[10px] text-slate-400 leading-relaxed">
+                  <li>
+                    <strong className="text-slate-300">Autoplay Policy:</strong> Browser ponsel membatasi suara otomatis jika waktu pemrosesan asinkron melebihi batas gestur. Gunakan tombol <span className="text-teal-300 font-bold">&quot;BACA JAWABAN&quot;</span> untuk memutar langsung dengan gestur sentuhan.
+                  </li>
+                  <li>
+                    <strong className="text-slate-300">voiceschanged:</strong> Di lingkungan PWA, suara dimuat secara asinkron. Aplikasi menunggu event secara aktif dengan interval polling 40ms dan timeout aman.
+                  </li>
+                  <li>
+                    <strong className="text-slate-300">synthesis-failed:</strong> Terjadi jika koneksi suara online terputus. Sistem secara otomatis beralih ke synthesizer lokal perangkat tanpa menghentikan aplikasi.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-2">
+              <button
+                onClick={() => {
+                  runAudioTest();
+                }}
+                className="px-3.5 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95"
+              >
+                <Play className="w-3.5 h-3.5 fill-white" />
+                <span>Uji Audio Sekarang</span>
+              </button>
+              <button
+                onClick={() => setShowDiagnosticsModal(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
