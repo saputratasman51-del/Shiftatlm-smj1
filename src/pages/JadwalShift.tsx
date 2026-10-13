@@ -536,6 +536,9 @@ export default function JadwalShift() {
         onFilterStaff={(profileId) => {
           setSelectedStaffFilter(profileId);
         }}
+        onSelectAssignment={(assignment) => {
+          setDetailModalItem(assignment);
+        }}
       />
 
       {/* =========================================================================
