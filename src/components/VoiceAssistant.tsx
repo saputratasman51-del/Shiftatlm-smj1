@@ -33,10 +33,24 @@ import {
   Shield,
   UserCheck,
   Users,
+  Calendar,
+  Clock,
 } from 'lucide-react';
 import { ShiftAssignment, Shift, UserProfile } from '../types';
 import { dataService, getPontianakDateString } from '../services/dataService';
 import { useAuth } from '../context/AuthContext';
+
+export interface MatchedShiftDutyOfficer {
+  profile: UserProfile;
+  assignment: ShiftAssignment;
+}
+
+export interface MatchedShiftDutyResult {
+  shift: Shift;
+  dateStr: string;
+  formattedDate: string;
+  officers: MatchedShiftDutyOfficer[];
+}
 import {
   useVoiceAssistant,
   TEST_VOICE_PHRASE,
@@ -211,6 +225,97 @@ export function matchStaffFromSpokenText(
   return { matchedProfile: null, isSelfExplicit: false, score: 0 };
 }
 
+export interface ShiftMatchResult {
+  matchedShift: Shift | null;
+  isDutyQuery: boolean;
+  isAllShiftsQuery: boolean;
+}
+
+/**
+ * Detects if the spoken query is looking for officers on a specific shift,
+ * e.g., "Siapa yang bertugas shift pagi tanggal 15 Oktober", "Petugas shift malam 20 Oktober", "Siapa dinas shift siang besok"
+ */
+export function matchShiftFromSpokenText(
+  spokenText: string,
+  availableShifts: Shift[]
+): ShiftMatchResult {
+  const text = spokenText.toLowerCase().trim();
+
+  // Duty intent marker phrases in Indonesian
+  const dutyPatterns = [
+    /siapa\s+(yang\s+)?(bertugas|jaga|dinas|piket|masuk|shift)/i,
+    /siapa\s+saja\s+(yang\s+)?(bertugas|jaga|dinas|piket|masuk|shift)/i,
+    /petugas\s+(yang\s+)?(bertugas|jaga|dinas|piket|masuk|shift)/i,
+    /daftar\s+petugas/i,
+    /cari\s+petugas/i,
+    /petugas\s+shift/i,
+    /siapa\s+(pagi|siang|malam|khusus|on[\s-]?call)/i,
+    /shift\s+(pagi|siang|malam|khusus|on[\s-]?call)\s+(siapa|petugas)/i,
+    /siapa\s+yang\s+(jaga|dinas|bertugas)/i,
+    /siapa\s+shift/i,
+    /siapa\s+dinas/i,
+    /siapa\s+jaga/i,
+  ];
+
+  let isDutyQuery = dutyPatterns.some((pattern) => pattern.test(text));
+
+  // Fallback keywords check
+  if (!isDutyQuery) {
+    const hasWhoOrStaff = text.includes('siapa') || text.includes('petugas') || text.includes('pegawai');
+    const hasShiftOrDuty = text.includes('shift') || text.includes('dinas') || text.includes('jaga') || text.includes('bertugas');
+    if (hasWhoOrStaff && hasShiftOrDuty) {
+      isDutyQuery = true;
+    }
+  }
+
+  // Identify specific shift
+  let matchedShift: Shift | null = null;
+
+  // 1. Shift Pagi
+  if (/\b(shift\s*pagi|pagi|subuh)\b/i.test(text)) {
+    matchedShift = availableShifts.find(
+      (s) => s.code.toUpperCase() === 'PAGI' || s.name.toLowerCase().includes('pagi') || s.id === 'shift-pagi'
+    ) || null;
+  }
+  // 2. Shift Siang / Sore
+  else if (/\b(shift\s*siang|siang|sore)\b/i.test(text)) {
+    matchedShift = availableShifts.find(
+      (s) => s.code.toUpperCase() === 'SIANG' || s.name.toLowerCase().includes('siang') || s.id === 'shift-siang'
+    ) || null;
+  }
+  // 3. Shift Malam
+  else if (/\b(shift\s*malam|malam)\b/i.test(text)) {
+    matchedShift = availableShifts.find(
+      (s) => s.code.toUpperCase() === 'MALAM' || s.name.toLowerCase().includes('malam') || s.id === 'shift-malam'
+    ) || null;
+  }
+  // 4. Shift Khusus / On-call
+  else if (/\b(shift\s*khusus|khusus|on[\s-]?call)\b/i.test(text)) {
+    matchedShift = availableShifts.find(
+      (s) => s.code.toUpperCase() === 'KHUSUS' || s.name.toLowerCase().includes('khusus') || s.name.toLowerCase().includes('call') || s.id === 'shift-khusus'
+    ) || null;
+  }
+
+  // 5. Check custom shift names
+  if (!matchedShift) {
+    for (const shift of availableShifts) {
+      const cleanName = shift.name.toLowerCase().replace(/shift\s*/gi, '').trim();
+      if (cleanName && cleanName.length >= 3 && text.includes(cleanName)) {
+        matchedShift = shift;
+        break;
+      }
+    }
+  }
+
+  const isAllShiftsQuery = isDutyQuery && !matchedShift;
+
+  return {
+    matchedShift,
+    isDutyQuery,
+    isAllShiftsQuery,
+  };
+}
+
 /**
  * Extracts date, month, and year from natural Indonesian speech.
  */
@@ -337,6 +442,7 @@ export function VoiceAssistant({
   const [showTextFallback, setShowTextFallback] = useState(false);
   const [matchedAssignmentResult, setMatchedAssignmentResult] = useState<ShiftAssignment | null>(null);
   const [matchedTargetProfile, setMatchedTargetProfile] = useState<UserProfile | null>(null);
+  const [matchedShiftDutyResult, setMatchedShiftDutyResult] = useState<MatchedShiftDutyResult | null>(null);
   const [isStaffSearchMatched, setIsStaffSearchMatched] = useState<boolean>(false);
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
   const [showAndroidTtsGuideModal, setShowAndroidTtsGuideModal] = useState(false);
@@ -399,6 +505,7 @@ export function VoiceAssistant({
     setErrorMessage(null);
     setMatchedAssignmentResult(null);
     setMatchedTargetProfile(null);
+    setMatchedShiftDutyResult(null);
     setIsStaffSearchMatched(false);
     setAutoplayBlocked(false);
 
@@ -430,7 +537,183 @@ export function VoiceAssistant({
         }
       }
 
-      // 2. Identify target staff from spoken transcript
+      // 2. Identify reverse query: search officers on duty by specific shift + date & month (Requirement 4)
+      const shiftMatch = matchShiftFromSpokenText(text, shifts);
+      if (shiftMatch.isDutyQuery && (shiftMatch.matchedShift !== null || shiftMatch.isAllShiftsQuery)) {
+        if (!effectiveIsAdmin) {
+          const callerCleanName = cleanTitleFromStaffName(activeProfileName);
+          const deniedReply = `Mohon maaf, pencarian daftar petugas yang bertugas pada shift spesifik hanya dapat diakses oleh Administrator. Sebagai petugas ${callerCleanName}, Anda hanya dapat mengakses jadwal dinas akun Anda sendiri.`;
+          setResponseMessage(deniedReply);
+          await speakResponse(deniedReply);
+          return;
+        }
+
+        // Admin authorized!
+        const todayDateStr = getPontianakDateString();
+        const { targetDateStr } = extractDateAndMonth(text, todayDateStr);
+
+        let registeredProfiles = effectiveProfiles;
+        if (!registeredProfiles || registeredProfiles.length === 0) {
+          try {
+            registeredProfiles = await dataService.getProfiles();
+          } catch (e) {
+            registeredProfiles = [];
+          }
+        }
+
+        let dayAssignments: ShiftAssignment[] = [];
+        try {
+          dayAssignments = await dataService.getAssignments({ date: targetDateStr });
+        } catch (dbErr) {
+          dayAssignments = [];
+        }
+        if (!dayAssignments || dayAssignments.length === 0) {
+          dayAssignments = assignments.filter((a) => a.shift_date === targetDateStr);
+        }
+
+        const [y, m, d] = targetDateStr.split('-');
+        const targetDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        const formattedDate = targetDateObj.toLocaleDateString('id-ID', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        });
+
+        const targetShift = shiftMatch.matchedShift;
+
+        if (targetShift) {
+          // Specific shift duty lookup
+          const matchingAssignments = dayAssignments.filter((a) => {
+            return (
+              a.shift_id === targetShift.id ||
+              a.shift?.id === targetShift.id ||
+              a.shift?.code?.toUpperCase() === targetShift.code.toUpperCase() ||
+              (a.shift?.name && targetShift.name && a.shift.name.toLowerCase() === targetShift.name.toLowerCase())
+            );
+          });
+
+          const onDutyStaff: MatchedShiftDutyOfficer[] = matchingAssignments.map((a) => {
+            const profile =
+              registeredProfiles.find((p) => p.id === a.profile_id) ||
+              a.profile || {
+                id: a.profile_id,
+                full_name: 'Petugas Terdaftar',
+                nip_str: '',
+                role: 'staff',
+                position: 'Petugas ATLM',
+                phone: '',
+                is_active: true,
+              };
+            const resolvedShift = a.shift || shifts.find((s) => s.id === a.shift_id) || targetShift;
+            return {
+              profile,
+              assignment: { ...a, shift: resolvedShift },
+            };
+          });
+
+          const shiftTimeText =
+            targetShift.start_time && targetShift.end_time
+              ? ` pukul ${targetShift.start_time.slice(0, 5)} sampai ${targetShift.end_time.slice(0, 5)} WIB`
+              : '';
+
+          let reply = '';
+          if (onDutyStaff.length > 0) {
+            const spokenNames = onDutyStaff
+              .map((item) => cleanTitleFromStaffName(item.profile.full_name))
+              .join(', dan ');
+
+            reply = `Pada ${targetShift.name}${shiftTimeText} hari ${formattedDate}, petugas yang bertugas adalah ${spokenNames}. Kalender telah diarahkan ke tanggal tersebut.`;
+          } else {
+            reply = `Tidak ada petugas yang bertugas pada ${targetShift.name}${shiftTimeText} hari ${formattedDate}. Kalender telah diarahkan ke tanggal tersebut.`;
+          }
+
+          setMatchedShiftDutyResult({
+            shift: targetShift,
+            dateStr: targetDateStr,
+            formattedDate,
+            officers: onDutyStaff,
+          });
+
+          onNavigateDate(targetDateStr);
+          onSelectMonth(targetDateStr.slice(0, 7));
+          onFilterStaff('all');
+
+          setResponseMessage(reply);
+          await speakResponse(reply);
+          return;
+        } else {
+          // General all shifts duty query for date
+          const allDutyOfficers: MatchedShiftDutyOfficer[] = dayAssignments.map((a) => {
+            const profile =
+              registeredProfiles.find((p) => p.id === a.profile_id) ||
+              a.profile || {
+                id: a.profile_id,
+                full_name: 'Petugas Terdaftar',
+                nip_str: '',
+                role: 'staff',
+                position: 'Petugas Laboratorium',
+                phone: '',
+                is_active: true,
+              };
+            const resolvedShift =
+              a.shift ||
+              shifts.find((s) => s.id === a.shift_id) || {
+                id: a.shift_id,
+                name: 'Shift Jaga',
+                code: 'JAGA',
+                start_time: '07:00:00',
+                end_time: '14:00:00',
+                color_code: '#0284c7',
+                description: '',
+                is_active: true,
+              };
+            return {
+              profile,
+              assignment: { ...a, shift: resolvedShift },
+            };
+          });
+
+          let reply = '';
+          if (allDutyOfficers.length > 0) {
+            const summaryList = allDutyOfficers
+              .map(
+                (item) =>
+                  `${item.assignment.shift?.name || 'Shift'} oleh ${cleanTitleFromStaffName(item.profile.full_name)}`
+              )
+              .join(', ');
+            reply = `Pada hari ${formattedDate}, petugas yang bertugas adalah: ${summaryList}. Kalender telah diarahkan ke tanggal tersebut.`;
+          } else {
+            reply = `Tidak ditemukan jadwal petugas yang bertugas pada hari ${formattedDate}. Kalender telah diarahkan ke tanggal tersebut.`;
+          }
+
+          setMatchedShiftDutyResult({
+            shift: {
+              id: 'all-shifts',
+              name: 'Semua Shift',
+              code: 'SEMUA',
+              start_time: '',
+              end_time: '',
+              color_code: '#0d9488',
+              description: 'Daftar semua dinas jaga',
+              is_active: true,
+            },
+            dateStr: targetDateStr,
+            formattedDate,
+            officers: allDutyOfficers,
+          });
+
+          onNavigateDate(targetDateStr);
+          onSelectMonth(targetDateStr.slice(0, 7));
+          onFilterStaff('all');
+
+          setResponseMessage(reply);
+          await speakResponse(reply);
+          return;
+        }
+      }
+
+      // 3. Identify target staff from spoken transcript (Staff Schedule Lookup)
       let registeredProfiles = effectiveProfiles;
       if (!registeredProfiles || registeredProfiles.length === 0) {
         try {
@@ -1248,6 +1531,111 @@ export function VoiceAssistant({
                       </div>
                     </div>
                   )}
+
+                  {/* Matched Shift Duty Query Result Card (Requirement 4) */}
+                  {matchedShiftDutyResult && (
+                    <div className="mt-2.5 pt-2.5 border-t border-teal-500/30 flex flex-col gap-3 bg-slate-900/95 p-3.5 rounded-xl border border-teal-500/30">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/40 flex items-center gap-1">
+                            <Crown className="w-2.5 h-2.5 text-amber-300" />
+                            Pencarian Petugas Shift (Mode Admin)
+                          </span>
+                          <span
+                            className="px-2.5 py-0.5 rounded-full text-white font-bold text-[11px] shadow-xs flex items-center gap-1"
+                            style={{ backgroundColor: matchedShiftDutyResult.shift.color_code || '#0d9488' }}
+                          >
+                            <Clock className="w-3 h-3 text-white" />
+                            {matchedShiftDutyResult.shift.name}
+                            {matchedShiftDutyResult.shift.start_time && matchedShiftDutyResult.shift.end_time && (
+                              <span className="opacity-90 font-mono text-[10px]">
+                                ({matchedShiftDutyResult.shift.start_time.slice(0, 5)} - {matchedShiftDutyResult.shift.end_time.slice(0, 5)} WIB)
+                              </span>
+                            )}
+                          </span>
+                          <span className="bg-teal-950 text-teal-300 px-2.5 py-0.5 rounded-full font-semibold text-[10px] border border-teal-600/30 flex items-center gap-1">
+                            <Calendar className="w-3 h-3 text-teal-400" />
+                            {matchedShiftDutyResult.formattedDate}
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => onFilterStaff('all')}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-medium rounded-lg border border-slate-700 transition cursor-pointer self-start sm:self-center"
+                          title="Tampilkan semua petugas di kalender"
+                        >
+                          Tampilkan Semua di Kalender
+                        </button>
+                      </div>
+
+                      {matchedShiftDutyResult.officers.length > 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-[11px] font-bold text-teal-300 flex items-center gap-1.5">
+                            <UserCheck className="w-3.5 h-3.5 text-teal-400" />
+                            <span>Daftar Petugas yang Bertugas ({matchedShiftDutyResult.officers.length} Orang):</span>
+                          </p>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {matchedShiftDutyResult.officers.map((item, idx) => (
+                              <div
+                                key={item.assignment.id || `officer-${idx}`}
+                                className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-teal-500/40 transition flex items-center justify-between gap-2.5"
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <img
+                                    src={item.profile.avatar_url || '/src/assets/images/avatar_tasman_1791739900476.jpg'}
+                                    alt={item.profile.full_name}
+                                    className="w-9 h-9 rounded-full object-cover border border-teal-400 shrink-0"
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-white text-xs truncate">
+                                      {item.profile.full_name}
+                                    </p>
+                                    <p className="text-[10px] text-slate-300 truncate">
+                                      {item.profile.position || 'Petugas ATLM'}
+                                    </p>
+                                    {item.assignment.notes && (
+                                      <p className="text-[10px] text-teal-300/90 italic truncate mt-0.5">
+                                        Catatan: {item.assignment.notes}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    onClick={() => onFilterStaff(item.profile.id)}
+                                    className="px-2 py-1 bg-teal-600/80 hover:bg-teal-500 text-white text-[10px] font-semibold rounded-lg transition cursor-pointer active:scale-95"
+                                    title={`Filter kalender untuk ${item.profile.full_name}`}
+                                  >
+                                    Filter Petugas
+                                  </button>
+                                  {onSelectAssignment && (
+                                    <button
+                                      onClick={() => onSelectAssignment(item.assignment)}
+                                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[10px] font-medium rounded-lg border border-slate-700 transition cursor-pointer"
+                                      title="Buka detail penugasan shift"
+                                    >
+                                      Detail
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="py-3 px-3 rounded-xl bg-slate-950/50 border border-slate-800 text-center">
+                          <p className="text-amber-300 text-xs font-semibold">
+                            Tidak ada petugas yang dijadwalkan pada {matchedShiftDutyResult.shift.name} untuk tanggal ini.
+                          </p>
+                          <p className="text-[10px] text-slate-400 mt-1">
+                            Silakan coba tanggal atau shift lain, atau periksa pengaturan kalender.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1309,7 +1697,7 @@ export function VoiceAssistant({
             onChange={(e) => setTextInputFallback(e.target.value)}
             placeholder={
               effectiveIsAdmin
-                ? "Ketik perintah (contoh: Jadwal shift Siti Rahmawati tanggal 15 Oktober 2026)"
+                ? "Ketik perintah (contoh: Siapa yang bertugas shift pagi tanggal 15 Oktober 2026?)"
                 : "Ketik perintah (contoh: Cek jadwal shift saya tanggal 15 Oktober 2026)"
             }
             className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
@@ -1324,34 +1712,110 @@ export function VoiceAssistant({
         </form>
       )}
 
-      {/* Admin Quick Petugas Selection Pills */}
-      {effectiveIsAdmin && effectiveProfiles.length > 0 && (
-        <div className="mt-3.5 pt-3 border-t border-slate-800/80 space-y-1.5 relative z-10">
-          <div className="flex items-center justify-between flex-wrap gap-1 text-[11px]">
-            <span className="font-bold text-amber-300 flex items-center gap-1.5">
-              <Crown className="w-3.5 h-3.5 text-amber-400" />
-              <span>Pencarian Cepat Jadwal Petugas Terdaftar (Uji Suara Admin):</span>
-            </span>
-            <span className="text-[10px] text-slate-400">
-              Klik nama petugas di bawah untuk mencari jadwalnya secara otomatis
-            </span>
+      {/* Admin Quick Shift & Petugas Search Panels */}
+      {effectiveIsAdmin && (
+        <div className="mt-3.5 pt-3 border-t border-slate-800/80 space-y-3 relative z-10">
+          {/* 1. Quick Shift Duty Search Pills (Requirement 4) */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between flex-wrap gap-1 text-[11px]">
+              <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                <Crown className="w-3.5 h-3.5 text-amber-400" />
+                <span>Pencarian Petugas Berdasarkan Shift & Tanggal (Uji Cepat Admin):</span>
+              </span>
+              <span className="text-[10px] text-slate-400">
+                Klik tombol di bawah untuk simulasi pencarian suara shift spesifik
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                onClick={() => handleTestSampleCommand('Siapa yang bertugas shift pagi tanggal 15 Oktober 2026?')}
+                className="px-2.5 py-1 rounded-lg bg-sky-950/80 hover:bg-sky-900 text-sky-200 border border-sky-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                title="Cari siapa yang bertugas Shift Pagi pada 15 Oktober 2026"
+              >
+                <Clock className="w-3 h-3 text-sky-400" />
+                <span>Shift Pagi 15 Okt (Siti)</span>
+              </button>
+              <button
+                onClick={() => handleTestSampleCommand('Siapa yang bertugas shift siang tanggal 15 Oktober 2026?')}
+                className="px-2.5 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                title="Cari siapa yang bertugas Shift Siang pada 15 Oktober 2026"
+              >
+                <Clock className="w-3 h-3 text-amber-400" />
+                <span>Shift Siang 15 Okt (Budi)</span>
+              </button>
+              <button
+                onClick={() => handleTestSampleCommand('Siapa yang bertugas shift malam tanggal 15 Oktober 2026?')}
+                className="px-2.5 py-1 rounded-lg bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 border border-indigo-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                title="Cari siapa yang bertugas Shift Malam pada 15 Oktober 2026"
+              >
+                <Clock className="w-3 h-3 text-indigo-400" />
+                <span>Shift Malam 15 Okt (Nurul)</span>
+              </button>
+              <button
+                onClick={() => handleTestSampleCommand('Siapa yang bertugas shift khusus tanggal 15 Oktober 2026?')}
+                className="px-2.5 py-1 rounded-lg bg-teal-950/80 hover:bg-teal-900 text-teal-200 border border-teal-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                title="Cari siapa yang bertugas Shift Khusus pada 15 Oktober 2026"
+              >
+                <Clock className="w-3 h-3 text-teal-400" />
+                <span>Shift Khusus 15 Okt (Tasman)</span>
+              </button>
+              <button
+                onClick={() => handleTestSampleCommand('Petugas yang bertugas shift pagi tanggal 16 Oktober 2026?')}
+                className="px-2.5 py-1 rounded-lg bg-sky-950/80 hover:bg-sky-900 text-sky-200 border border-sky-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                title="Cari siapa yang bertugas Shift Pagi pada 16 Oktober 2026"
+              >
+                <Clock className="w-3 h-3 text-sky-400" />
+                <span>Shift Pagi 16 Okt (Ahmad)</span>
+              </button>
+              <button
+                onClick={() => handleTestSampleCommand('Siapa dinas shift siang tanggal 20 Oktober 2026?')}
+                className="px-2.5 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                title="Cari siapa yang dinas Shift Siang pada 20 Oktober 2026"
+              >
+                <Clock className="w-3 h-3 text-amber-400" />
+                <span>Shift Siang 20 Okt (Siti)</span>
+              </button>
+              <button
+                onClick={() => handleTestSampleCommand('Siapa yang bertugas shift pagi tanggal 20 Oktober 2026?')}
+                className="px-2.5 py-1 rounded-lg bg-sky-950/80 hover:bg-sky-900 text-sky-200 border border-sky-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                title="Cari siapa yang bertugas Shift Pagi pada 20 Oktober 2026"
+              >
+                <Clock className="w-3 h-3 text-sky-400" />
+                <span>Shift Pagi 20 Okt (Budi)</span>
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {effectiveProfiles.map((p) => {
-              const clean = cleanTitleFromStaffName(p.full_name);
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => handleTestSampleCommand(`Jadwal shift ${clean} tanggal 15 Oktober 2026`)}
-                  className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-teal-950 text-slate-300 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
-                  title={`Cari jadwal ${p.full_name} tanggal 15 Oktober 2026`}
-                >
-                  <UserCheck className="w-3 h-3 text-teal-400" />
-                  <span>{clean} (15 Okt)</span>
-                </button>
-              );
-            })}
-          </div>
+
+          {/* 2. Quick Staff Schedule Search Pills (Requirement 3) */}
+          {effectiveProfiles.length > 0 && (
+            <div className="space-y-1.5 pt-2 border-t border-slate-800/60">
+              <div className="flex items-center justify-between flex-wrap gap-1 text-[11px]">
+                <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <UserCheck className="w-3.5 h-3.5 text-teal-400" />
+                  <span>Pencarian Jadwal Per Petugas Terdaftar:</span>
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  Cari jadwal dinas petugas spesifik pada 15 Oktober 2026
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {effectiveProfiles.map((p) => {
+                  const clean = cleanTitleFromStaffName(p.full_name);
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => handleTestSampleCommand(`Jadwal shift ${clean} tanggal 15 Oktober 2026`)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-teal-950 text-slate-300 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                      title={`Cari jadwal ${p.full_name} tanggal 15 Oktober 2026`}
+                    >
+                      <UserCheck className="w-3 h-3 text-teal-400" />
+                      <span>{clean} (15 Okt)</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1364,6 +1828,24 @@ export function VoiceAssistant({
         {effectiveIsAdmin ? (
           <>
             <button
+              onClick={() => handleTestSampleCommand('Siapa yang bertugas shift pagi tanggal 15 Oktober 2026?')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Siapa yang bertugas shift pagi 15 Oktober?&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Petugas yang bertugas shift malam tanggal 15 Oktober 2026')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Petugas shift malam 15 Oktober&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Siapa dinas shift siang tanggal 15 Oktober 2026?')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Siapa dinas shift siang 15 Oktober?&rdquo;
+            </button>
+            <button
               onClick={() => handleTestSampleCommand('Jadwal shift Siti Rahmawati tanggal 15 Oktober 2026')}
               className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
             >
@@ -1373,25 +1855,13 @@ export function VoiceAssistant({
               onClick={() => handleTestSampleCommand('Cari shift Budi Santoso tanggal 15 Oktober 2026')}
               className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
             >
-              &ldquo;Cari shift Budi Santoso 15 Oktober 2026&rdquo;
-            </button>
-            <button
-              onClick={() => handleTestSampleCommand('Jadwal Nurul Hidayah tanggal 15 Oktober 2026')}
-              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
-            >
-              &ldquo;Jadwal Nurul Hidayah 15 Oktober 2026&rdquo;
+              &ldquo;Cari shift Budi Santoso 15 Oktober&rdquo;
             </button>
             <button
               onClick={() => handleTestSampleCommand('Shift Ahmad Fauzi tanggal 16 Oktober 2026')}
               className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
             >
-              &ldquo;Shift Ahmad Fauzi 16 Oktober 2026&rdquo;
-            </button>
-            <button
-              onClick={() => handleTestSampleCommand('Jadwal Tasman Saputra tanggal 15 Oktober 2026')}
-              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
-            >
-              &ldquo;Jadwal Tasman Saputra 15 Oktober 2026&rdquo;
+              &ldquo;Shift Ahmad Fauzi 16 Oktober&rdquo;
             </button>
             <button
               onClick={() => handleTestSampleCommand('Cek jadwal shift saya hari ini')}
