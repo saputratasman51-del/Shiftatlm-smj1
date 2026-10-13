@@ -1,4 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useRef } from 'react';
 import {
   Mic,
   MicOff,
@@ -13,11 +18,17 @@ import {
   AlertCircle,
   HelpCircle,
   Play,
-  Calendar,
+  Smartphone,
+  Radio,
+  Loader2,
 } from 'lucide-react';
 import { ShiftAssignment, Shift } from '../types';
 import { dataService, getPontianakDateString } from '../services/dataService';
-import { useVoiceAssistant, VoiceAssistantStatus, primeAudio } from '../hooks/useVoiceAssistant';
+import {
+  useVoiceAssistant,
+  TEST_VOICE_PHRASE,
+  primeAudio,
+} from '../hooks/useVoiceAssistant';
 
 interface VoiceAssistantProps {
   activeProfileId: string;
@@ -79,10 +90,13 @@ export function VoiceAssistant({
     transcript,
     responseMessage,
     speechEnabled,
-    isSupported,
-    isRecognitionSupported,
+    isPwa,
     errorMessage,
     selectedVoice,
+    testAudioStatus,
+    testAudioMessage,
+    autoplayBlocked,
+    setAutoplayBlocked,
     setSpeechEnabled,
     setTranscript,
     setResponseMessage,
@@ -93,6 +107,7 @@ export function VoiceAssistant({
     speakResponse,
     stopSpeaking,
     repeatResponse,
+    runAudioTest,
   } = useVoiceAssistant({
     defaultSpeechEnabled: true,
     onCommandRecognized: (recognizedText) => {
@@ -113,6 +128,7 @@ export function VoiceAssistant({
     setStatus('searching');
     setErrorMessage(null);
     setMatchedAssignmentResult(null);
+    setAutoplayBlocked(false);
 
     const text = rawText.toLowerCase().trim();
 
@@ -207,7 +223,6 @@ export function VoiceAssistant({
       let foundAssignment: ShiftAssignment | null = null;
 
       try {
-        // Query database via dataService directly
         const freshAssignments = await dataService.getAssignments({
           date: targetDateStr,
           profileId: activeProfileId,
@@ -251,7 +266,6 @@ export function VoiceAssistant({
 
       let reply = '';
       if (foundAssignment) {
-        // Resolve shift information
         const resolvedShift =
           foundAssignment.shift || shifts.find((s) => s.id === foundAssignment?.shift_id);
         const shiftName = resolvedShift?.name || 'Shift Jaga';
@@ -297,27 +311,21 @@ export function VoiceAssistant({
     handleProcessCommand(sample);
   };
 
-  const handleTestSpeakerSound = () => {
-    primeAudio();
-    const greeting = `Halo ${activeProfileName}, fitur suara bahasa Indonesia di aplikasi Shift ATLM RSUD Sultan Muhammad Jamaludin Satu siap digunakan.`;
-    setResponseMessage(greeting);
-    speakResponse(greeting);
-  };
-
+  // Status Badge for Assistant
   const renderStatusBadge = () => {
     switch (status) {
       case 'listening':
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 animate-pulse">
             <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
-            Mendengarkan suara...
+            Mendengarkan...
           </span>
         );
       case 'searching':
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
             <Search className="w-3 h-3 animate-spin text-amber-300" />
-            Mencari jadwal dari database...
+            Mencari jadwal...
           </span>
         );
       case 'speaking':
@@ -344,9 +352,45 @@ export function VoiceAssistant({
       default:
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
-            Tekan mikrofon untuk berbicara
+            Tekan untuk berbicara
           </span>
         );
+    }
+  };
+
+  // Status Badge for Test Audio Button
+  const renderTestAudioBadge = () => {
+    switch (testAudioStatus) {
+      case 'checking':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Memeriksa dukungan suara...
+          </span>
+        );
+      case 'speaking':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 animate-pulse shadow-sm shadow-cyan-500/20">
+            <Volume2 className="w-3.5 h-3.5 animate-bounce text-cyan-300" />
+            Sedang berbicara...
+          </span>
+        );
+      case 'completed':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            Suara selesai.
+          </span>
+        );
+      case 'failed':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+            Gagal memutar suara.
+          </span>
+        );
+      default:
+        return null;
     }
   };
 
@@ -409,6 +453,13 @@ export function VoiceAssistant({
                 Asisten Suara Pintar (id-ID)
               </span>
 
+              {isPwa && (
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-400/30 flex items-center gap-1">
+                  <Smartphone className="w-3 h-3 text-indigo-300" />
+                  Mode PWA Aktif
+                </span>
+              )}
+
               {renderStatusBadge()}
             </div>
 
@@ -447,14 +498,15 @@ export function VoiceAssistant({
             </button>
           )}
 
-          {/* Test Speaker Audio button */}
+          {/* Dedicated TES SUARA Button */}
           <button
-            onClick={handleTestSpeakerSound}
-            className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-cyan-300 hover:text-white border border-cyan-500/30 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-            title="Uji speaker pembaca suara bahasa Indonesia"
+            onClick={() => runAudioTest()}
+            disabled={testAudioStatus === 'checking' || testAudioStatus === 'speaking'}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-cyan-600/20 border border-cyan-400/30 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+            title="Uji speaker pembaca suara bahasa Indonesia (Independen)"
           >
-            <Play className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden lg:inline">Tes Suara</span>
+            <Play className="w-3.5 h-3.5 text-white fill-white" />
+            <span>TES SUARA</span>
           </button>
 
           {/* Audio toggle button */}
@@ -494,9 +546,52 @@ export function VoiceAssistant({
         </div>
       </div>
 
+      {/* Independent TES SUARA Execution & Status Panel */}
+      {testAudioStatus !== 'idle' && (
+        <div className="mt-3.5 p-3 rounded-xl bg-slate-900/95 border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in relative z-10">
+          <div className="flex items-center gap-2.5">
+            <Radio className="w-4 h-4 text-cyan-400 shrink-0 animate-pulse" />
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-bold text-cyan-200">
+                  Uji Coba Pembacaan Suara:
+                </span>
+                {renderTestAudioBadge()}
+              </div>
+              <p className="text-[11px] text-slate-300 mt-0.5 italic">
+                &ldquo;{TEST_VOICE_PHRASE}&rdquo;
+              </p>
+              {testAudioMessage && (
+                <p className="text-[10px] text-cyan-300/80 font-mono mt-0.5">
+                  Status: {testAudioMessage}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {testAudioStatus === 'speaking' ? (
+              <button
+                onClick={stopSpeaking}
+                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold rounded-lg transition cursor-pointer"
+              >
+                Hentikan
+              </button>
+            ) : (
+              <button
+                onClick={() => runAudioTest()}
+                className="px-2.5 py-1 bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold rounded-lg transition cursor-pointer"
+              >
+                Uji Lagi
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Spoken Equalizer / Audio Wave animation during 'speaking' */}
       {status === 'speaking' && (
-        <div className="mt-3 py-2 px-3 bg-cyan-950/40 rounded-xl border border-cyan-500/30 flex items-center justify-between text-xs text-cyan-200 animate-fade-in">
+        <div className="mt-3 py-2 px-3 bg-cyan-950/50 rounded-xl border border-cyan-500/40 flex items-center justify-between text-xs text-cyan-200 animate-fade-in">
           <div className="flex items-center gap-2">
             <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />
             <span className="font-medium">Sedang membacakan respons:</span>
@@ -514,6 +609,36 @@ export function VoiceAssistant({
             <span className="w-1 bg-cyan-400 rounded-full animate-bounce h-5" style={{ animationDelay: '450ms' }} />
             <span className="w-1 bg-cyan-400 rounded-full animate-bounce h-4" style={{ animationDelay: '200ms' }} />
           </div>
+        </div>
+      )}
+
+      {/* PWA Autoplay Restriction Banner (Shows friendly 1-tap "Dengarkan Jawaban" button if browser suppressed automatic playback) */}
+      {autoplayBlocked && responseMessage && status !== 'speaking' && (
+        <div className="mt-3.5 p-3.5 bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/70 rounded-xl border border-amber-500/50 text-amber-200 flex flex-col sm:flex-row items-center justify-between gap-3 animate-fade-in relative z-10 shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0 border border-amber-500/30">
+              <Volume2 className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-amber-100">
+                Jawaban Siap Didengarkan (Kebijakan Audio PWA / Browser)
+              </p>
+              <p className="text-[11px] text-amber-300/90 mt-0.5">
+                Perangkat atau PWA Anda membatasi suara otomatis setelah pencarian database. Tekan tombol untuk mendengarkan.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              setAutoplayBlocked(false);
+              repeatResponse();
+            }}
+            className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 shrink-0 flex items-center gap-1.5 cursor-pointer"
+          >
+            <Play className="w-3.5 h-3.5 fill-slate-950" />
+            <span>Dengarkan Jawaban</span>
+          </button>
         </div>
       )}
 
@@ -540,7 +665,7 @@ export function VoiceAssistant({
                 <CheckCircle2 className="w-5 h-5 text-teal-400 shrink-0 mt-0.5" />
                 <div>
                   <span className="text-[10px] uppercase font-bold text-teal-300 block mb-0.5">
-                    Jawaban Asisten ATLM (Dibacakan Bersuara):
+                    Jawaban Asisten ATLM (Bahasa Indonesia):
                   </span>
                   <p className="leading-relaxed font-medium text-slate-100 text-xs sm:text-sm">
                     {responseMessage}
