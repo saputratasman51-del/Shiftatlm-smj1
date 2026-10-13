@@ -1211,12 +1211,14 @@ class DataService {
       }
     }
 
-    if (swaps.length === 0) {
-      const today = getPontianakDateString();
-      const nextDate = new Date();
-      nextDate.setDate(nextDate.getDate() + 2);
-      const futureDate = getPontianakDateString(nextDate);
+    const today = getPontianakDateString();
+    const nextDate = new Date();
+    nextDate.setDate(nextDate.getDate() + 2);
+    const futureDate = getPontianakDateString(nextDate);
 
+    let needSave = false;
+
+    if (swaps.length === 0) {
       swaps = [
         {
           id: 'swap-demo-hari-h',
@@ -1245,6 +1247,21 @@ class DataService {
           created_at: new Date().toISOString(),
         },
       ];
+      needSave = true;
+    } else {
+      const demoHariH = swaps.find((s) => s.id === 'swap-demo-hari-h');
+      if (demoHariH && demoHariH.shift_date !== today) {
+        demoHariH.shift_date = today;
+        needSave = true;
+      }
+      const demoFuture = swaps.find((s) => s.id === 'swap-demo-future');
+      if (demoFuture && demoFuture.shift_date !== futureDate) {
+        demoFuture.shift_date = futureDate;
+        needSave = true;
+      }
+    }
+
+    if (needSave) {
       this.safeLocalStorageSet(STORAGE_KEYS.SHIFT_SWAPS, JSON.stringify(swaps));
     }
 

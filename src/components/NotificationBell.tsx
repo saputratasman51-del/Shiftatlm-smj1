@@ -345,11 +345,11 @@ export function NotificationBell() {
                             <button
                               onClick={() => {
                                 setIsOpen(false);
-                                navigate('/jadwal');
+                                navigate('/tukar-shift');
                               }}
-                              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-2xs active:scale-95"
+                              className="px-2.5 py-1.5 rounded-lg bg-teal-800 hover:bg-teal-700 text-white text-xs font-bold transition shadow-2xs active:scale-95"
                             >
-                              Lihat Jadwal
+                              Buka Tukar Shift
                             </button>
                           </div>
                         </div>
@@ -402,11 +402,11 @@ export function NotificationBell() {
                           <button
                             onClick={() => {
                               setIsOpen(false);
-                              navigate('/jadwal');
+                              navigate('/tukar-shift');
                             }}
                             className="font-bold text-teal-700 hover:text-teal-800 hover:underline"
                           >
-                            Cek di Jadwal &rarr;
+                            Cek di Tukar Shift &rarr;
                           </button>
                         </div>
                       </div>

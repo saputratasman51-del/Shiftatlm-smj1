@@ -113,7 +113,14 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
     const today = new Date(todayStr);
     const swapDate = new Date(swap.shift_date);
     const diffDays = Math.ceil((swapDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    const countdownText = diffDays === 0 ? 'HARI H (HARI INI)' : diffDays === 1 ? 'H-1 (BESOK)' : `H-${diffDays} (${diffDays} hari lagi)`;
+    const countdownText =
+      diffDays === 0
+        ? 'HARI H (HARI INI)'
+        : diffDays === 1
+        ? 'H-1 (BESOK)'
+        : diffDays === 2
+        ? 'H-2 (2 HARI LAGI)'
+        : `H-${diffDays} (${diffDays} hari lagi)`;
 
     const text = `📢 *PENGINGAT RESMI TUKAR SHIFT JAGA (SELURUH PETUGAS ATLM)*\n` +
       `RSUD Sultan Muhammad Jamaludin I\n\n` +
@@ -136,6 +143,7 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
         const diffDays = Math.ceil((swapDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         const isHariH = diffDays === 0;
         const isHMinus1 = diffDays === 1;
+        const isHMinus2 = diffDays === 2;
 
         const reqName = swap.requester?.full_name || 'Petugas ATLM';
         const targetName = swap.target_profile?.full_name || 'Rekan ATLM';
@@ -150,7 +158,9 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
             key={swap.id}
             className={`rounded-2xl border transition-all overflow-hidden shadow-sm relative ${
               isHariH
-                ? 'bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-teal-500/15 border-amber-400/80 ring-2 ring-amber-400/40'
+                ? 'bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-teal-500/15 border-amber-400/90 ring-2 ring-amber-400/50'
+                : isHMinus2
+                ? 'bg-gradient-to-r from-indigo-500/15 via-blue-500/10 to-teal-500/15 border-indigo-400/90 ring-2 ring-indigo-400/40'
                 : isHMinus1
                 ? 'bg-gradient-to-r from-blue-500/10 via-teal-500/10 to-emerald-500/10 border-teal-300'
                 : 'bg-gradient-to-r from-slate-50 to-teal-50/50 border-slate-200'
@@ -161,6 +171,8 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
               className={`px-3.5 py-2 flex flex-wrap items-center justify-between gap-1.5 text-xs font-bold text-white ${
                 isHariH
                   ? 'bg-gradient-to-r from-amber-600 via-rose-600 to-amber-700 animate-pulse'
+                  : isHMinus2
+                  ? 'bg-gradient-to-r from-indigo-700 via-blue-700 to-teal-800'
                   : isHMinus1
                   ? 'bg-gradient-to-r from-teal-700 to-blue-700'
                   : 'bg-gradient-to-r from-slate-800 to-teal-900'
@@ -170,7 +182,9 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
                 <Bell className="w-3.5 h-3.5 shrink-0" />
                 <span className="uppercase tracking-wider text-xs font-extrabold">
                   {isHariH
-                    ? '🔥 HARI H PERTUKARAN SHIFT (HARI INI)!'
+                    ? '🔥 NOTIFIKASI HARI H PERTUKARAN SHIFT (HARI INI)!'
+                    : isHMinus2
+                    ? '⏰ PENGINGAT H-2 PERTUKARAN SHIFT (2 HARI LAGI)!'
                     : isHMinus1
                     ? '⏰ PENGINGAT H-1 PERTUKARAN SHIFT (BESOK)!'
                     : `📅 PENGINGAT H-${diffDays} PERTUKARAN SHIFT (${diffDays} HARI LAGI)`}
@@ -248,10 +262,18 @@ export function SwapReminderBanner({ compact = false }: SwapReminderBannerProps)
                   </button>
 
                   <button
-                    onClick={() => navigate('/jadwal')}
+                    onClick={() => {
+                      const el = document.getElementById(`swap-${swap.id}`);
+                      if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      } else {
+                        navigate('/tukar-shift');
+                      }
+                    }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-xs active:scale-95"
+                    title="Buka rincian di Menu Tukar Shift"
                   >
-                    <span>Lihat Jadwal</span>
+                    <span>Rincian Tukar Shift</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>

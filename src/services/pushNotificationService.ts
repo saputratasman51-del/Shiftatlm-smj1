@@ -134,13 +134,16 @@ export const pushNotificationService = {
         let body = '';
 
         if (diffDays === 0) {
-          title = `🔥 HARI H: Pengingat Tukar Shift Hari Ini!`;
-          body = `Hari ini (${targetDate}), ${targetName} menggantikan ${reqName} pada ${shiftName}. Mohon perhatikan serah terima tugas.`;
+          title = `🔥 NOTIFIKASI HARI H: Pertukaran Shift Hari Ini!`;
+          body = `Hari ini (${targetDate}), ${targetName} resmi menggantikan ${reqName} pada ${shiftName}. Mohon perhatikan serah terima tugas.`;
         } else if (diffDays === 1) {
-          title = `⏰ H-1: Pengingat Tukar Shift Besok!`;
+          title = `⏰ PENGINGAT H-1: Pertukaran Shift Besok!`;
           body = `Besok (${targetDate}), ${targetName} menggantikan ${reqName} pada ${shiftName}. Harap bersiap.`;
+        } else if (diffDays === 2) {
+          title = `⏰ PENGINGAT H-2: Pertukaran Shift (2 Hari Lagi)!`;
+          body = `Pengingat 2 hari lagi (${targetDate}): ${targetName} menggantikan ${reqName} pada ${shiftName}. Mohon persiapkan serah terima tugas.`;
         } else if (diffDays <= 7) {
-          title = `📅 H-${diffDays}: Pengingat Tukar Shift Mendatang`;
+          title = `📅 PENGINGAT H-${diffDays}: Pertukaran Shift Mendatang`;
           body = `Pengingat H-${diffDays} (${targetDate}): ${targetName} menggantikan ${reqName} pada ${shiftName}.`;
         }
 
