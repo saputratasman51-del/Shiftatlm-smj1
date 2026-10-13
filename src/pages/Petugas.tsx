@@ -23,7 +23,7 @@ import { Avatar } from '../components/Avatar';
 import { compressImage } from '../utils/compressImage';
 
 export default function Petugas() {
-  const { activeProfile, isAdmin, switchProfile, refreshProfiles } = useAuth();
+  const { activeProfile, isAdmin, canSimulate, switchProfile, refreshProfiles } = useAuth();
   const { showToast } = useToast();
 
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
@@ -307,17 +307,33 @@ export default function Petugas() {
 
               {/* Bottom Actions */}
               <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                <button
-                  onClick={() => switchProfile(p.id)}
-                  className={`text-xs font-semibold py-1.5 px-2.5 rounded-lg transition-colors flex items-center gap-1 ${
-                    isCurrentUser
-                      ? 'bg-teal-50 text-teal-700 font-bold'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                  }`}
-                >
-                  <UserCheck className="w-3.5 h-3.5" />
-                  <span>{isCurrentUser ? 'Sedang Digunakan' : 'Ganti ke Akun Ini'}</span>
-                </button>
+                {canSimulate ? (
+                  <button
+                    onClick={() => switchProfile(p.id)}
+                    className={`text-xs font-semibold py-1.5 px-2.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
+                      isCurrentUser
+                        ? 'bg-teal-50 text-teal-700 font-bold border border-teal-200'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>{isCurrentUser ? 'Sedang Digunakan' : 'Simulasikan Akun Ini'}</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    {isCurrentUser ? (
+                      <span className="text-xs font-bold py-1.5 px-2.5 rounded-lg bg-teal-50 text-teal-700 border border-teal-200 flex items-center gap-1">
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>Akun Saya (Aktif)</span>
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-slate-400 py-1.5 flex items-center gap-1">
+                        <Shield className="w-3.5 h-3.5 text-slate-300" />
+                        <span>Rekan Petugas ATLM</span>
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {isAdmin && (
                   <div className="flex items-center gap-1">

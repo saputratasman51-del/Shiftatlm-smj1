@@ -17,6 +17,7 @@ import {
   ArrowRight,
   Building2,
   RefreshCw,
+  UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getPontianakTimeString } from '../services/dataService';
@@ -35,7 +36,17 @@ interface LayoutProps {
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const { activeProfile, isAdmin, allProfiles, switchProfile } = useAuth();
+  const {
+    activeProfile,
+    authenticatedProfile,
+    isAdmin,
+    isRealAdmin,
+    canSimulate,
+    isSimulating,
+    allProfiles,
+    switchProfile,
+    stopSimulation,
+  } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(getPontianakTimeString());
@@ -162,10 +173,18 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           {/* In-app PWA install action banner */}
           <PWAInstallButton />
 
+          {/* Active Profile Info / Quick Switcher */}
           <div className="relative">
             <button
-              onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-              className="w-full flex items-center gap-2.5 p-2 rounded-xl hover:bg-slate-800/60 transition-colors text-left"
+              onClick={() => {
+                if (canSimulate) {
+                  setProfileDropdownOpen(!profileDropdownOpen);
+                } else {
+                  navigate('/profil');
+                }
+              }}
+              className="w-full flex items-center gap-2.5 p-2 rounded-xl hover:bg-slate-800/60 transition-colors text-left cursor-pointer"
+              title={canSimulate ? 'Simulasi Akun Petugas (Khusus Admin)' : 'Akun Saya - Buka Profil'}
             >
               <Avatar profile={activeProfile} size="sm" showStatus />
               <div className="flex-1 min-w-0">
@@ -181,15 +200,24 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   </p>
                 </div>
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              {canSimulate ? (
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${profileDropdownOpen ? 'rotate-180' : ''}`} />
+              ) : (
+                <span title="Akun Mandiri" className="inline-flex">
+                  <Shield className="w-3.5 h-3.5 text-teal-400/80 shrink-0" />
+                </span>
+              )}
             </button>
 
-            {/* Profile switcher dropdown */}
-            {profileDropdownOpen && (
+            {/* Profile switcher dropdown (Hanya untuk Admin) */}
+            {canSimulate && profileDropdownOpen && (
               <div className="absolute bottom-full left-0 w-full mb-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 z-50 text-xs">
-                <p className="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                  Simulasi Akun Petugas:
-                </p>
+                <div className="px-2 py-1 flex items-center justify-between text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <span>Simulasi Akun:</span>
+                  <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.2 rounded border border-amber-500/30">
+                    Admin
+                  </span>
+                </div>
                 {allProfiles.map((p) => (
                   <button
                     key={p.id}
@@ -197,7 +225,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                       switchProfile(p.id);
                       setProfileDropdownOpen(false);
                     }}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
                       p.id === activeProfile.id
                         ? 'bg-teal-600/30 text-teal-300 font-bold'
                         : 'text-slate-300 hover:bg-slate-800'
@@ -449,53 +477,55 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 </div>
               </div>
 
-              {/* Collapsible Switch Profile (Simulasi) */}
-              <div className="pt-2 border-t border-slate-800">
-                <button
-                  onClick={() => setShowSimulateList(!showSimulateList)}
-                  className="w-full flex items-center justify-between py-1.5 px-1 text-slate-400 hover:text-white transition"
-                >
-                  <span className="text-[11px] font-semibold flex items-center gap-1.5">
-                    <Shield className="w-3.5 h-3.5 text-teal-400" />
-                    Simulasi Akun Petugas ({allProfiles.length} terdaftar)
-                  </span>
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showSimulateList ? 'rotate-180' : ''}`} />
-                </button>
+              {/* Collapsible Switch Profile (Simulasi) - KHUSUS ADMIN */}
+              {canSimulate && (
+                <div className="pt-2 border-t border-slate-800">
+                  <button
+                    onClick={() => setShowSimulateList(!showSimulateList)}
+                    className="w-full flex items-center justify-between py-1.5 px-1 text-slate-400 hover:text-white transition cursor-pointer"
+                  >
+                    <span className="text-[11px] font-semibold flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-amber-400" />
+                      Simulasi Akun Petugas ({allProfiles.length} terdaftar)
+                    </span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showSimulateList ? 'rotate-180' : ''}`} />
+                  </button>
 
-                {showSimulateList && (
-                  <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                    {allProfiles.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          switchProfile(p.id);
-                          setMobileDrawerOpen(false);
-                        }}
-                        className={`w-full flex items-center gap-2.5 p-2 rounded-xl text-left transition-colors ${
-                          p.id === activeProfile.id
-                            ? 'bg-teal-600/30 border border-teal-500/40 text-teal-200 font-semibold'
-                            : 'hover:bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        <Avatar profile={p} size="xs" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold truncate">{p.full_name}</p>
-                          <p className="text-[10px] text-slate-400 truncate">{p.position}</p>
-                        </div>
-                        <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
-                            p.role === 'admin'
-                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                              : 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                  {showSimulateList && (
+                    <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {allProfiles.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => {
+                            switchProfile(p.id);
+                            setMobileDrawerOpen(false);
+                          }}
+                          className={`w-full flex items-center gap-2.5 p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                            p.id === activeProfile.id
+                              ? 'bg-teal-600/30 border border-teal-500/40 text-teal-200 font-semibold'
+                              : 'hover:bg-slate-800 text-slate-300'
                           }`}
                         >
-                          {p.role}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                          <Avatar profile={p} size="xs" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold truncate">{p.full_name}</p>
+                            <p className="text-[10px] text-slate-400 truncate">{p.position}</p>
+                          </div>
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                              p.role === 'admin'
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                : 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                            }`}
+                          >
+                            {p.role}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* In-app PWA install action banner */}
               <div className="pt-2">
@@ -537,7 +567,31 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         </div>
 
         {/* Render child pages */}
-        <div className="flex-1 max-w-7xl w-full mx-auto p-3.5 sm:p-5 lg:p-6">{children}</div>
+        <div className="flex-1 max-w-7xl w-full mx-auto p-3.5 sm:p-5 lg:p-6">
+          {/* Active Simulation Indicator Banner for Admin */}
+          {isSimulating && (
+            <div className="mb-4 bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-amber-500/5 border border-amber-500/40 rounded-2xl p-3 sm:p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-sm text-amber-950 animate-fade-in">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                <div className="text-xs min-w-0">
+                  <span className="font-bold text-amber-900">Mode Simulasi Pengujian: </span>
+                  <span className="text-slate-700">
+                    Anda sedang menguji tampilan sebagai <strong>{activeProfile.full_name}</strong> ({activeProfile.role === 'admin' ? 'Administrator' : 'Petugas ATLM'}).
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={stopSimulation}
+                className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl transition shadow-sm flex items-center gap-1.5 cursor-pointer ml-auto shrink-0"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Kembali ke Akun Admin Saya</span>
+              </button>
+            </div>
+          )}
+          {children}
+        </div>
       </main>
 
       {/* =========================================================================

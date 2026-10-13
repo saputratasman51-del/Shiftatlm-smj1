@@ -28,7 +28,19 @@ import { Avatar } from '../components/Avatar';
 import { pushNotificationService } from '../services/pushNotificationService';
 
 export default function Profil() {
-  const { activeProfile, isAdmin, allProfiles, switchProfile, refreshProfiles, logout } = useAuth();
+  const {
+    activeProfile,
+    authenticatedProfile,
+    isAdmin,
+    isRealAdmin,
+    canSimulate,
+    isSimulating,
+    allProfiles,
+    switchProfile,
+    stopSimulation,
+    refreshProfiles,
+    logout,
+  } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
@@ -508,48 +520,92 @@ export default function Profil() {
       </div>
 
       {/* =========================================================================
-          PENGALIHAN CEPAT PERAN / SIMULASI PENGUJIAN
+          PENGALIHAN CEPAT PERAN / SIMULASI PENGUJIAN (KHUSUS ADMIN)
       ========================================================================= */}
-      <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/90 shadow-sm space-y-3 text-xs">
-        <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-          <UserCheck className="w-4 h-4 text-teal-600" />
-          Uji Peran & Simulasi Akun Petugas
-        </h3>
-        <p className="text-slate-500">
-          Pilih salah satu akun di bawah untuk menguji tampilan aplikasi sebagai Administrator atau Petugas ATLM:
-        </p>
+      {canSimulate ? (
+        <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/90 shadow-sm space-y-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-teal-600" />
+              <span>Uji Peran &amp; Simulasi Akun Petugas</span>
+              <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-200">
+                Akses Khusus Admin
+              </span>
+            </h3>
+            {isSimulating && (
+              <button
+                type="button"
+                onClick={stopSimulation}
+                className="text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-xl border border-teal-200 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Kembali ke Akun Admin Saya</span>
+              </button>
+            )}
+          </div>
+          <p className="text-slate-500">
+            Sebagai Administrator, Anda memiliki otorisasi penuh untuk menguji peran dan mensimulasikan antarmuka aplikasi sebagai Administrator atau Petugas ATLM:
+          </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
-          {allProfiles.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => switchProfile(p.id)}
-              className={`p-3 rounded-xl border text-left transition-all ${
-                p.id === activeProfile.id
-                  ? 'border-teal-500 bg-teal-50/30 ring-1 ring-teal-500 font-bold'
-                  : 'border-slate-200 hover:border-slate-300 bg-slate-50/40 hover:bg-slate-100/50'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <Avatar profile={p} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 truncate">{p.full_name}</span>
-                    <span
-                      className={`text-[9px] uppercase px-1.5 py-0.2 rounded font-bold ${
-                        p.role === 'admin' ? 'bg-rose-100 text-rose-800' : 'bg-teal-100 text-teal-800'
-                      }`}
-                    >
-                      {p.role}
-                    </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
+            {allProfiles.map((p) => {
+              const isActiveCurrent = p.id === activeProfile.id;
+              const isMyRealAccount = p.id === authenticatedProfile.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => switchProfile(p.id)}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    isActiveCurrent
+                      ? 'border-teal-500 bg-teal-50/40 ring-1 ring-teal-500 font-bold'
+                      : 'border-slate-200 hover:border-slate-300 bg-slate-50/40 hover:bg-slate-100/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Avatar profile={p} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-900 truncate">{p.full_name}</span>
+                        <span
+                          className={`text-[9px] uppercase px-1.5 py-0.2 rounded font-bold ${
+                            p.role === 'admin' ? 'bg-rose-100 text-rose-800' : 'bg-teal-100 text-teal-800'
+                          }`}
+                        >
+                          {p.role}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-0.5 truncate">{p.position}</p>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        {isActiveCurrent && (
+                          <span className="text-[10px] text-teal-700 font-bold">● Sedang Digunakan</span>
+                        )}
+                        {isMyRealAccount && (
+                          <span className="text-[9px] text-amber-700 bg-amber-50 px-1 rounded border border-amber-200 font-semibold">
+                            Akun Utama Anda
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5 truncate">{p.position}</p>
-                </div>
-              </div>
-            </button>
-          ))}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/90 space-y-2 text-xs">
+          <div className="flex items-center gap-2 text-slate-800 font-bold">
+            <Shield className="w-4 h-4 text-teal-600" />
+            <span className="text-sm">Hak Akses: Akun Petugas Mandiri</span>
+            <span className="text-[10px] bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full font-semibold border border-teal-200">
+              Hanya Akun Pribadi
+            </span>
+          </div>
+          <p className="text-slate-600 text-xs leading-relaxed">
+            Fitur uji peran dan simulasi akun petugas hanya dapat diakses oleh Administrator Lab. Petugas selain admin hanya dapat mengakses, melihat jadwal tugas, dan memperbarui profil akunnya sendiri demi menjamin integritas data dan keamanan operasional laboratorium.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
