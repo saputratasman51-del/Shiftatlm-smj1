@@ -26,6 +26,9 @@ import {
   Check,
   X,
   Activity,
+  ChevronDown,
+  ChevronUp,
+  Settings,
 } from 'lucide-react';
 import { ShiftAssignment, Shift } from '../types';
 import { dataService, getPontianakDateString } from '../services/dataService';
@@ -35,6 +38,7 @@ import {
   primeAudio,
   playMelodicChime,
   VoiceDiagnosticLog,
+  FailureStage,
 } from '../hooks/useVoiceAssistant';
 
 interface VoiceAssistantProps {
@@ -90,6 +94,8 @@ export function VoiceAssistant({
   const [showTextFallback, setShowTextFallback] = useState(false);
   const [matchedAssignmentResult, setMatchedAssignmentResult] = useState<ShiftAssignment | null>(null);
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [showAndroidTtsGuideModal, setShowAndroidTtsGuideModal] = useState(false);
+  const [showInlineMobileDiag, setShowInlineMobileDiag] = useState(false);
   const [copiedLogStatus, setCopiedLogStatus] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -104,12 +110,16 @@ export function VoiceAssistant({
     isSynthesisSupported,
     errorMessage,
     availableVoices,
+    voiceLanguages,
+    hasIndonesianVoice,
     selectedVoice,
     testAudioStatus,
     testAudioMessage,
     autoplayBlocked,
     diagnosticLogs,
     lastErrorCode,
+    lastFailureStage,
+    processStatus,
     setAutoplayBlocked,
     setSpeechEnabled,
     setTranscript,
@@ -399,10 +409,23 @@ export function VoiceAssistant({
         );
       case 'failed':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-            <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
-            Gagal memutar suara{lastErrorCode ? ` [${lastErrorCode}]` : '.'}
-          </span>
+          <div className="inline-flex items-center gap-1.5 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+              Gagal memutar suara{lastErrorCode ? ` [${lastErrorCode}]` : '.'}
+            </span>
+            {lastFailureStage && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-rose-950/80 text-rose-200 border border-rose-800/40">
+                {lastFailureStage === 'failed-before-start'
+                  ? 'Gagal sebelum mulai'
+                  : lastFailureStage === 'failed-after-start'
+                  ? 'Gagal setelah mulai'
+                  : lastFailureStage === 'timeout-unresponsive'
+                  ? 'Waktu habis'
+                  : 'API tidak didukung'}
+              </span>
+            )}
+          </div>
         );
       default:
         return null;
@@ -585,80 +608,185 @@ export function VoiceAssistant({
 
       {/* Independent TES SUARA Execution & Status Panel */}
       {testAudioStatus !== 'idle' && (
-        <div className="mt-3.5 p-3.5 rounded-xl bg-slate-900/95 border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in relative z-10">
-          <div className="flex items-start sm:items-center gap-2.5">
-            <Radio className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5 sm:mt-0 animate-pulse" />
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-bold text-cyan-200">
-                  Uji Coba Pembacaan Suara:
-                </span>
-                {renderTestAudioBadge()}
-                {lastErrorCode && (
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-500/40">
-                    Kode: {lastErrorCode}
+        <div className="mt-3.5 p-3.5 rounded-xl bg-slate-900/95 border border-cyan-500/40 flex flex-col gap-3 animate-fade-in relative z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start sm:items-center gap-2.5">
+              <Radio className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5 sm:mt-0 animate-pulse" />
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-bold text-cyan-200">
+                    Uji Coba Pembacaan Suara:
                   </span>
+                  {renderTestAudioBadge()}
+                  {lastErrorCode && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-500/40">
+                      Kode: {lastErrorCode}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-300 mt-0.5 italic">
+                  &ldquo;{TEST_VOICE_PHRASE}&rdquo;
+                </p>
+                {testAudioMessage && (
+                  <p className="text-[10px] text-cyan-300/90 font-mono mt-0.5">
+                    Status: {testAudioMessage}
+                  </p>
                 )}
               </div>
-              <p className="text-[11px] text-slate-300 mt-0.5 italic">
-                &ldquo;{TEST_VOICE_PHRASE}&rdquo;
-              </p>
-              {testAudioMessage && (
-                <p className="text-[10px] text-cyan-300/90 font-mono mt-0.5">
-                  Status: {testAudioMessage}
-                </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+              {testAudioStatus === 'speaking' ? (
+                <button
+                  onClick={stopSpeaking}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg transition cursor-pointer flex items-center gap-1 shadow-sm"
+                >
+                  <Square className="w-3 h-3 fill-white" />
+                  <span>Hentikan</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => runAudioTest('indonesian-preferred')}
+                  className="px-3 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold rounded-lg transition cursor-pointer flex items-center gap-1 shadow-sm active:scale-95"
+                >
+                  <RotateCcw className="w-3 h-3 text-cyan-200" />
+                  <span>Uji Ulang</span>
+                </button>
               )}
 
-              {/* Actionable fallbacks if failed */}
-              {testAudioStatus === 'failed' && (
-                <div className="mt-2 flex items-center gap-2 flex-wrap">
-                  <button
-                    onClick={() => runAudioTest(true)}
-                    className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-bold rounded-lg transition cursor-pointer flex items-center gap-1 shadow-sm active:scale-95"
-                    title="Coba menggunakan synthesizer bawaan perangkat"
-                  >
-                    <Play className="w-3 h-3 fill-white" />
-                    <span>Uji Suara Bawaan Sistem</span>
-                  </button>
-                  <button
-                    onClick={() => playMelodicChime()}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-semibold rounded-lg border border-cyan-500/30 transition cursor-pointer flex items-center gap-1"
-                    title="Uji apakah speaker perangkat aktif"
-                  >
-                    <Volume2 className="w-3 h-3 text-cyan-400" />
-                    <span>Tes Speaker (Melodi)</span>
-                  </button>
-                  <button
-                    onClick={() => setShowDiagnosticsModal(true)}
-                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-cyan-300 text-[11px] font-mono rounded-lg border border-cyan-500/40 transition cursor-pointer flex items-center gap-1"
-                    title="Buka detail log diagnostik error"
-                  >
-                    <Terminal className="w-3 h-3 text-cyan-400" />
-                    <span>Detail Error & Log</span>
-                  </button>
-                </div>
-              )}
+              {/* Toggle Inline Mobile Diagnostic */}
+              <button
+                onClick={() => setShowInlineMobileDiag(!showInlineMobileDiag)}
+                className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
+                  showInlineMobileDiag
+                    ? 'bg-slate-700 text-white border-slate-600'
+                    : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border-slate-700'
+                }`}
+                title="Tampilkan panel diagnostik teknis langsung di layar HP"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden xs:inline">Diagnostik HP</span>
+                {showInlineMobileDiag ? (
+                  <ChevronUp className="w-3 h-3" />
+                ) : (
+                  <ChevronDown className="w-3 h-3" />
+                )}
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-            {testAudioStatus === 'speaking' ? (
+          {/* Actionable fallbacks & Troubleshooting buttons if failed */}
+          {testAudioStatus === 'failed' && (
+            <div className="pt-2 border-t border-slate-800/80 flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] text-slate-400 font-bold block w-full">
+                Opsi Pemulihan Suara:
+              </span>
               <button
-                onClick={stopSpeaking}
-                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg transition cursor-pointer flex items-center gap-1"
+                onClick={() => runAudioTest('system-id')}
+                className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-bold rounded-lg transition cursor-pointer flex items-center gap-1 shadow-sm active:scale-95"
+                title="Coba tanpa mengikat objek suara (menggunakan synthesizer bawaan OS id-ID)"
               >
-                <Square className="w-3 h-3 fill-white" />
-                <span>Hentikan</span>
+                <Play className="w-3 h-3 fill-white" />
+                <span>Uji Suara Bawaan Sistem (id-ID)</span>
               </button>
-            ) : (
               <button
-                onClick={() => runAudioTest()}
-                className="px-3 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold rounded-lg transition cursor-pointer active:scale-95"
+                onClick={() => runAudioTest('neutral')}
+                className="px-2.5 py-1 bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-semibold rounded-lg transition cursor-pointer flex items-center gap-1 shadow-sm active:scale-95"
+                title="Coba menggunakan suara netral perangkat"
               >
-                Uji Lagi
+                <Play className="w-3 h-3 fill-white" />
+                <span>Uji Suara Netral OS</span>
               </button>
-            )}
-          </div>
+              <button
+                onClick={() => playMelodicChime()}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-semibold rounded-lg border border-cyan-500/30 transition cursor-pointer flex items-center gap-1"
+                title="Uji apakah speaker perangkat aktif menggunakan gelombang audio"
+              >
+                <Volume2 className="w-3 h-3 text-cyan-400" />
+                <span>Tes Speaker (Melodi)</span>
+              </button>
+              <button
+                onClick={() => setShowAndroidTtsGuideModal(true)}
+                className="px-2.5 py-1 bg-amber-950/80 hover:bg-amber-900/80 text-amber-300 text-[11px] font-semibold rounded-lg border border-amber-500/40 transition cursor-pointer flex items-center gap-1"
+                title="Cara mengaktifkan dan mengunduh suara bahasa Indonesia di Android"
+              >
+                <HelpCircle className="w-3 h-3 text-amber-400" />
+                <span>Panduan TTS Android</span>
+              </button>
+              <button
+                onClick={() => setShowDiagnosticsModal(true)}
+                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-cyan-300 text-[11px] font-mono rounded-lg border border-cyan-500/40 transition cursor-pointer flex items-center gap-1"
+                title="Buka detail log diagnostik error lengkap"
+              >
+                <Terminal className="w-3 h-3 text-cyan-400" />
+                <span>Detail Log Error</span>
+              </button>
+            </div>
+          )}
+
+          {/* Quick Mobile Inline Diagnostic Card (directly visible on phone screen) */}
+          {(showInlineMobileDiag || testAudioStatus === 'failed') && (
+            <div className="mt-1 p-3 rounded-xl bg-slate-950/90 border border-cyan-500/30 text-[11px] space-y-2 animate-fade-in font-sans">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
+                <span className="font-bold text-cyan-300 flex items-center gap-1.5 text-xs">
+                  <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
+                  Diagnostik Cepat HP & PWA
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {isPwa ? 'Mode: PWA Standalone' : 'Mode: Web Browser'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[9px] uppercase font-bold">API SpeechSynthesis</span>
+                  <span className={isSynthesisSupported ? 'text-teal-300 font-bold' : 'text-rose-400 font-bold'}>
+                    {isSynthesisSupported ? 'Didukung' : 'Tidak Didukung'}
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[9px] uppercase font-bold">Jumlah Suara</span>
+                  <span className="text-cyan-300 font-bold">
+                    {availableVoices.length > 0 ? `${availableVoices.length} suara` : '0 (belum dimuat OS)'}
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[9px] uppercase font-bold">Suara Indonesia</span>
+                  <span className={hasIndonesianVoice ? 'text-emerald-300 font-bold' : 'text-amber-300 font-medium'}>
+                    {hasIndonesianVoice ? (selectedVoice?.name || 'Tersedia') : 'Bawaan Sistem OS (id-ID)'}
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[9px] uppercase font-bold">Kode Error Asli</span>
+                  <span className={lastErrorCode ? 'text-rose-400 font-mono font-bold' : 'text-slate-400 font-mono'}>
+                    {lastErrorCode || 'Nihil'}
+                  </span>
+                </div>
+              </div>
+
+              {voiceLanguages.length > 0 && (
+                <div className="pt-1 border-t border-slate-900 text-[10px]">
+                  <span className="text-slate-400 font-medium">Bahasa terdaftar pada perangkat: </span>
+                  <span className="text-slate-300 font-mono">
+                    {voiceLanguages.slice(0, 8).join(', ')}
+                    {voiceLanguages.length > 8 ? ` (+${voiceLanguages.length - 8} lainnya)` : ''}
+                  </span>
+                </div>
+              )}
+
+              <div className="pt-1 border-t border-slate-900 text-[10px] flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <span className="text-slate-400">Status Alur: </span>
+                  <span className="text-slate-200 font-medium">{processStatus}</span>
+                </div>
+                {lastFailureStage && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/50">
+                    Tahap: {lastFailureStage}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -949,20 +1077,60 @@ export function VoiceAssistant({
                 </div>
               </div>
 
-              {/* Active Voice Info */}
-              <div className="p-3 rounded-xl bg-teal-950/30 border border-teal-500/20 flex items-start gap-2 text-[11px] text-teal-200">
-                <Volume2 className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-bold text-teal-100">Suara Bahasa Indonesia Terpilih:</span>{' '}
-                  {selectedVoice ? (
-                    <span className="font-mono text-cyan-200">
-                      {selectedVoice.name} ({selectedVoice.lang}) &bull;{' '}
-                      {selectedVoice.localService ? 'Suara Lokal (Offline)' : 'Suara Jaringan (Remote)'}
-                    </span>
+              {/* Active Voice Info & Failure Stage */}
+              <div className="space-y-2">
+                <div className="p-3 rounded-xl bg-teal-950/30 border border-teal-500/20 flex items-start gap-2 text-[11px] text-teal-200">
+                  <Volume2 className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />
+                  <div className="w-full">
+                    <span className="font-bold text-teal-100">Suara Bahasa Indonesia Terpilih:</span>{' '}
+                    {selectedVoice ? (
+                      <span className="font-mono text-cyan-200">
+                        {selectedVoice.name} ({selectedVoice.lang}) &bull;{' '}
+                        {selectedVoice.localService ? 'Suara Lokal (Offline)' : 'Suara Jaringan (Remote)'}
+                      </span>
+                    ) : (
+                      <span className="text-amber-300 font-medium">
+                        Menggunakan Suara Bawaan Sistem OS (id-ID otomatis)
+                      </span>
+                    )}
+
+                    <div className="mt-1 pt-1 border-t border-teal-500/20 flex items-center justify-between gap-2 flex-wrap text-[10px]">
+                      <span className="text-slate-300">
+                        Status Alur Terakhir: <strong className="text-white">{processStatus}</strong>
+                      </span>
+                      {lastFailureStage && (
+                        <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800 font-mono">
+                          Tahap Gagal: {lastFailureStage}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Voice Languages List */}
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px]">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
+                    Daftar Bahasa Suara Terpasang di Perangkat ({voiceLanguages.length}):
+                  </span>
+                  {voiceLanguages.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {voiceLanguages.map((l) => (
+                        <span
+                          key={l}
+                          className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${
+                            l.toLowerCase().includes('id')
+                              ? 'bg-teal-950 text-teal-300 border border-teal-500/40 font-bold'
+                              : 'bg-slate-900 text-slate-400 border border-slate-800'
+                          }`}
+                        >
+                          {l}
+                        </span>
+                      ))}
+                    </div>
                   ) : (
-                    <span className="text-amber-300 font-medium">
-                      Menggunakan Suara Bawaan Sistem OS (id-ID otomatis)
-                    </span>
+                    <p className="text-slate-500 italic text-[10px]">
+                      Belum ada suara terdaftar dari OS (pada beberapa HP Android, daftar suara baru dimuat saat sintesis pertama dijalankan).
+                    </p>
                   )}
                 </div>
               </div>
@@ -1098,6 +1266,96 @@ export function VoiceAssistant({
                 className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
               >
                 Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          PANDUAN OUTPUT TEXT-TO-SPEECH ANDROID MODAL
+      ========================================================================= */}
+      {showAndroidTtsGuideModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl max-w-lg w-full flex flex-col shadow-2xl overflow-hidden text-white animate-scale-in">
+            {/* Header */}
+            <div className="p-4 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white">
+                    Panduan Suara Bahasa Indonesia di HP Android
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Solusi jika tombol suara menampilkan &quot;synthesis-failed&quot;
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAndroidTtsGuideModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-4 space-y-3.5 text-xs text-slate-300 overflow-y-auto max-h-[75vh]">
+              <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/30 text-amber-200 text-[11px] leading-relaxed">
+                Pesan error <strong className="font-mono text-amber-100">synthesis-failed</strong> di HP Android terjadi saat mesin Text-to-Speech bawaan perangkat belum memiliki atau belum mengunduh paket data suara <strong>Bahasa Indonesia</strong>.
+              </div>
+
+              <div className="space-y-2">
+                <p className="font-bold text-white text-xs">
+                  Langkah Mengaktifkan Suara Indonesia di Android:
+                </p>
+                <ol className="list-decimal list-inside space-y-2 text-slate-300 pl-1 text-[11px] leading-relaxed">
+                  <li>
+                    Buka menu <strong className="text-white">Pengaturan (Settings)</strong> pada ponsel Android Anda.
+                  </li>
+                  <li>
+                    Pilih menu <strong className="text-white">Aksesibilitas</strong> atau <strong className="text-white">Sistem / Manajemen Umum</strong> &gt; <strong className="text-white">Keluaran Teks-ke-ucapan (Text-to-speech output)</strong>.
+                  </li>
+                  <li>
+                    Di bagian <strong className="text-white">Mesin Pilihan (Preferred engine)</strong>, pilih <strong className="text-teal-300">Layanan Suara oleh Google (Speech Services by Google)</strong> atau <strong className="text-teal-300">Samsung Text-to-speech</strong>.
+                  </li>
+                  <li>
+                    Ketuk ikon <strong className="text-white">Gerigi (Pengaturan)</strong> di sebelah kanan Mesin Pilihan.
+                  </li>
+                  <li>
+                    Pilih <strong className="text-white">Instal data suara (Install voice data)</strong> &gt; cari <strong className="text-white">Bahasa Indonesia</strong> &gt; ketuk ikon Unduh.
+                  </li>
+                  <li>
+                    Setelah unduhan selesai, kembali ke aplikasi Shift ATLM lalu tekan <strong className="text-cyan-300">TES SUARA</strong> lagi. Suara akan langsung terdengar jernih!
+                  </li>
+                </ol>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px]">
+                <span className="font-bold text-teal-300 block mb-1">Tips Tambahan:</span>
+                Pastikan volume <strong>Media</strong> di ponsel dinaikkan (bukan hanya nada dering panggilan).
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-2">
+              <button
+                onClick={() => {
+                  setShowAndroidTtsGuideModal(false);
+                  runAudioTest('system-id');
+                }}
+                className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95"
+              >
+                <Play className="w-3.5 h-3.5 fill-white" />
+                <span>Coba Tes Suara Bawaan</span>
+              </button>
+              <button
+                onClick={() => setShowAndroidTtsGuideModal(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Mengerti
               </button>
             </div>
           </div>

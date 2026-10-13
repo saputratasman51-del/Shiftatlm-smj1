@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 export type VoiceAssistantStatus = 'idle' | 'listening' | 'searching' | 'speaking' | 'done' | 'error';
 export type TestAudioStatus = 'idle' | 'checking' | 'speaking' | 'completed' | 'failed';
+export type FailureStage = 'api-unsupported' | 'failed-before-start' | 'failed-after-start' | 'timeout-unresponsive' | null;
 
 export interface VoiceDiagnosticLog {
   id: string;
@@ -14,6 +15,7 @@ export interface VoiceDiagnosticLog {
   source: 'init' | 'voices' | 'test-audio' | 'speak-response' | 'recognition' | 'watchdog' | 'autoplay-check';
   type: 'info' | 'warn' | 'error';
   errorCode?: string;
+  failureStage?: FailureStage;
   message: string;
   details?: Record<string, any>;
 }
@@ -185,11 +187,22 @@ export function sanitizeSpeechText(text: string): string {
 }
 
 /**
- * Explicitly waits for the SpeechSynthesis 'voiceschanged' event with active polling fallback.
- * Especially critical in PWA standalone and mobile Chromium/WebKit environments where:
- * 1. Voices list is asynchronously populated after launch.
- * 2. 'voiceschanged' event may or may not trigger depending on OS background initialization.
- * 3. Polling checks every 40ms ensure fast discovery without indefinite hanging.
+ * Extracts unique language codes from a voice list.
+ */
+export function extractVoiceLanguages(voices: SpeechSynthesisVoice[]): string[] {
+  if (!voices || voices.length === 0) return [];
+  const set = new Set<string>();
+  voices.forEach((v) => {
+    if (v.lang) {
+      set.add(v.lang);
+    }
+  });
+  return Array.from(set).sort();
+}
+
+/**
+ * Asynchronously waits for voiceschanged event if immediate voice list is empty.
+ * Returns cached voices or whatever gets discovered within timeout.
  */
 export async function waitForVoices(timeoutMs: number = 1000): Promise<SpeechSynthesisVoice[]> {
   if (!isSpeechSynthesisAvailable()) return [];
@@ -272,35 +285,37 @@ export async function waitForVoices(timeoutMs: number = 1000): Promise<SpeechSyn
 /**
  * Finds the best Indonesian voice available in the browser's speechSynthesis engine.
  * Prioritizes local/offline Indonesian voices to prevent network 'synthesis-failed' errors.
+ * Also checks legacy 'in-ID' (Android/Java Indonesian locale code).
  */
 export function findIndonesianVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
   if (!voices || voices.length === 0) return null;
 
-  // 1. Local/offline Indonesian voice (highest reliability)
-  const localId = voices.find(
-    (v) =>
-      Boolean(v.localService || (v as any).local) &&
-      (v.lang.toLowerCase().replace('_', '-').startsWith('id') ||
-        v.name.toLowerCase().includes('indonesia'))
-  );
+  // 1. Local/offline Indonesian voice (highest reliability on mobile)
+  const localId = voices.find((v) => {
+    const l = (v.lang || '').toLowerCase().replace('_', '-');
+    const isIdLang = l === 'id-id' || l.startsWith('id') || l === 'in-id' || l.startsWith('in');
+    const isLocal = Boolean(v.localService || (v as any).local);
+    return isLocal && isIdLang;
+  });
   if (localId) return localId;
 
-  // 2. Exact 'id-ID' or starts with 'id'
+  // 2. Exact 'id-ID' or starts with 'id' / 'in'
   const exactId = voices.find((v) => {
-    const l = v.lang.toLowerCase().replace('_', '-');
-    return l === 'id-id' || l.startsWith('id');
+    const l = (v.lang || '').toLowerCase().replace('_', '-');
+    return l === 'id-id' || l.startsWith('id') || l === 'in-id' || l.startsWith('in');
   });
   if (exactId) return exactId;
 
   // 3. Known Indonesian voice names across platforms (Google Bahasa Indonesia, Damayanti, Gadis, etc.)
   const nameMatch = voices.find((v) => {
-    const name = v.name.toLowerCase();
+    const name = (v.name || '').toLowerCase();
     return (
       name.includes('indonesia') ||
       name.includes('bahasa') ||
       name.includes('damayanti') ||
       name.includes('gadis') ||
-      name.includes('id_id')
+      name.includes('id_id') ||
+      name.includes('id-id')
     );
   });
   if (nameMatch) return nameMatch;
@@ -321,7 +336,11 @@ export function useVoiceAssistant({
   const [isSynthesisSupported, setIsSynthesisSupported] = useState(true);
   const [isPwa, setIsPwa] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Voice state
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>(cachedVoices);
+  const [voiceLanguages, setVoiceLanguages] = useState<string[]>(extractVoiceLanguages(cachedVoices));
+  const [hasIndonesianVoice, setHasIndonesianVoice] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
 
   // Dedicated Test Audio states
@@ -331,9 +350,11 @@ export function useVoiceAssistant({
   // Autoplay restriction state (for PWA / mobile browser fallback prompt)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
 
-  // Diagnostic Logs state for tracking specific SpeechSynthesis errors & PWA events
+  // Diagnostic Logs & Detailed Error Tracking
   const [diagnosticLogs, setDiagnosticLogs] = useState<VoiceDiagnosticLog[]>([]);
   const [lastErrorCode, setLastErrorCode] = useState<string | null>(null);
+  const [lastFailureStage, setLastFailureStage] = useState<FailureStage>(null);
+  const [processStatus, setProcessStatus] = useState<string>('Siap (Menunggu perintah)');
 
   const recognitionRef = useRef<any>(null);
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -351,16 +372,19 @@ export function useVoiceAssistant({
       source: VoiceDiagnosticLog['source'],
       errorCode: string | undefined,
       message: string,
-      details?: Record<string, any>
+      details?: Record<string, any>,
+      stage?: FailureStage
     ) => {
       const now = new Date();
-      const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+      const timeStr =
+        now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
       const entry: VoiceDiagnosticLog = {
         id: `diag-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: timeStr,
         source,
         type,
         errorCode,
+        failureStage: stage,
         message,
         details,
       };
@@ -368,17 +392,26 @@ export function useVoiceAssistant({
       if (errorCode) {
         setLastErrorCode(errorCode);
       }
+      if (stage !== undefined) {
+        setLastFailureStage(stage);
+      }
 
       // Output to developer console
       if (type === 'error') {
-        console.error(`[VoiceAssistant Diag ${source}] ${errorCode ? `[${errorCode}] ` : ''}${message}`, details || '');
+        console.error(
+          `[VoiceAssistant Diag ${source}] ${errorCode ? `[${errorCode}] ` : ''}${stage ? `(${stage}) ` : ''}${message}`,
+          details || ''
+        );
       } else if (type === 'warn') {
-        console.warn(`[VoiceAssistant Diag ${source}] ${errorCode ? `[${errorCode}] ` : ''}${message}`, details || '');
+        console.warn(
+          `[VoiceAssistant Diag ${source}] ${errorCode ? `[${errorCode}] ` : ''}${stage ? `(${stage}) ` : ''}${message}`,
+          details || ''
+        );
       } else {
         console.log(`[VoiceAssistant Diag ${source}] ${message}`, details || '');
       }
 
-      setDiagnosticLogs((prev) => [entry, ...prev].slice(0, 40));
+      setDiagnosticLogs((prev) => [entry, ...prev].slice(0, 50));
     },
     []
   );
@@ -386,6 +419,8 @@ export function useVoiceAssistant({
   const clearDiagnosticLogs = useCallback(() => {
     setDiagnosticLogs([]);
     setLastErrorCode(null);
+    setLastFailureStage(null);
+    setProcessStatus('Log dibersihkan');
   }, []);
 
   // Initialize voice lists, PWA status, and support detection
@@ -411,7 +446,7 @@ export function useVoiceAssistant({
       primeAudio();
       window.removeEventListener('click', handleFirstUserInteraction);
       window.removeEventListener('touchstart', handleFirstUserInteraction);
-      addDiagnosticLog('info', 'init', undefined, 'Interaksi pengguna pertama terdeteksi (Audio context dipersiapkan)');
+      addDiagnosticLog('info', 'init', undefined, 'Interaksi sentuhan pertama terdeteksi (Audio context dipersiapkan)');
     };
     window.addEventListener('click', handleFirstUserInteraction, { once: true, passive: true });
     window.addEventListener('touchstart', handleFirstUserInteraction, { once: true, passive: true });
@@ -422,12 +457,28 @@ export function useVoiceAssistant({
       if (!isMounted) return;
       cachedVoices = voices;
       setAvailableVoices(voices);
+
+      const langs = extractVoiceLanguages(voices);
+      setVoiceLanguages(langs);
+
       const best = findIndonesianVoice(voices);
       setSelectedVoice(best);
-      addDiagnosticLog('info', 'voices', undefined, `Daftar suara dimuat: ${voices.length} suara terdeteksi`, {
-        voicesCount: voices.length,
-        selectedVoice: best ? `${best.name} (${best.lang})` : 'none',
-      });
+      setHasIndonesianVoice(Boolean(best));
+
+      addDiagnosticLog(
+        'info',
+        'voices',
+        undefined,
+        `Daftar suara dimuat: ${voices.length} suara terdeteksi (${langs.length} bahasa)`,
+        {
+          voicesCount: voices.length,
+          hasIndonesianVoice: Boolean(best),
+          selectedVoice: best
+            ? `${best.name} (${best.lang})${best.localService ? ' [Lokal]' : ' [Remote]'}`
+            : 'Belum ada suara id-ID spesifik (menggunakan fallback sistem bawaan OS)',
+          sampleLanguages: langs.slice(0, 8),
+        }
+      );
     };
 
     if (hasSynthesis) {
@@ -440,14 +491,18 @@ export function useVoiceAssistant({
       } catch (e) {}
 
       // Robust wait for 'voiceschanged' event and polling
-      waitForVoices(1200).then((voices) => {
-        handleVoiceUpdate(voices);
+      waitForVoices(1500).then((voices) => {
+        if (voices && voices.length > 0) {
+          handleVoiceUpdate(voices);
+        }
       });
 
       const onVoicesChangedListener = () => {
         try {
           const freshVoices = window.speechSynthesis.getVoices();
-          handleVoiceUpdate(freshVoices);
+          if (freshVoices && freshVoices.length > 0) {
+            handleVoiceUpdate(freshVoices);
+          }
         } catch (e) {}
       };
 
@@ -550,25 +605,36 @@ export function useVoiceAssistant({
       setTestAudioStatus('idle');
       setTestAudioMessage(null);
     }
+    setProcessStatus('Pemutaran dihentikan oleh pengguna');
     addDiagnosticLog('info', 'speak-response', undefined, 'Pemutaran suara dihentikan secara manual');
   }, [status, testAudioStatus, addDiagnosticLog]);
 
   /**
-   * Independent "TES SUARA" function directly triggered by user click.
-   * Tests speech synthesis immediately with progressive multi-stage fallback:
-   * 1. Try selected Indonesian voice (preferably local)
-   * 2. Try default system voice with lang = 'id-ID' (avoids remote Google TTS network 'synthesis-failed')
-   * 3. Try standard system utterance (lang = '', voice = null)
-   * 4. Acoustic harmonic chime fallback if device lacks TTS engines entirely
+   * Dedicated and INDEPENDENT "TES SUARA" function.
    *
-   * Captures specific error codes (e.g. synthesis-failed, not-allowed, audio-busy) in diagnostic logs.
+   * KEY ARCHITECTURAL FIXES FOR ANDROID CHROME PWA:
+   * 1. 100% SYNCHRONOUS execution on user tap/click. Does NOT `await waitForVoices` before calling speak().
+   *    Awaiting a promise causes user activation to expire in Android Chrome, causing `not-allowed` or `synthesis-failed`!
+   * 2. If voices list is empty (`getVoices().length === 0`), it does NOT treat this as failure.
+   *    It constructs the utterance with `utterance.lang = 'id-ID'` and `utterance.voice = null`, allowing
+   *    the native Android OS TextToSpeech engine to resolve the Indonesian voice automatically.
+   * 3. Multi-tier progressive fallback:
+   *    - Tier 1: Selected Indonesian voice (prioritizing local/offline).
+   *    - Tier 2: System native id-ID utterance without voice object (avoids remote Google TTS network failures).
+   *    - Tier 3: Standard system default voice (utterance.lang = '', voice = null).
+   *    - Tier 4: Acoustic melody via Web Audio API so speaker functionality is confirmed even without TTS packs.
+   * 4. Clear failure stage categorization:
+   *    - api-unsupported
+   *    - failed-before-start (onerror occurred before onstart)
+   *    - failed-after-start (onerror occurred after onstart)
+   *    - timeout-unresponsive (watchdog triggered)
    */
   const runAudioTest = useCallback(
-    async (forceDefaultVoice: boolean = false): Promise<boolean> => {
-      // 1. Synchronously trigger prime audio on user click to establish user activation
+    (forceTier: 'indonesian-preferred' | 'system-id' | 'neutral' = 'indonesian-preferred'): Promise<boolean> => {
+      // 1. Immediately prime audio and audio context synchronously
       primeAudio();
 
-      // Clear any prior test watchdog and interval
+      // Clear any prior test timers
       if (testWatchdogRef.current) {
         clearTimeout(testWatchdogRef.current);
         testWatchdogRef.current = null;
@@ -582,33 +648,40 @@ export function useVoiceAssistant({
         keepAliveIntervalRef.current = null;
       }
 
-      // Set checking state immediately
       setTestAudioStatus('checking');
-      setTestAudioMessage('Memeriksa dukungan suara...');
+      setTestAudioMessage('Memeriksa mesin suara...');
+      setProcessStatus('Memulai inisialisasi tes suara...');
 
-      // 2. Validate availability
+      // 2. Validate API availability
       if (!isSpeechSynthesisAvailable()) {
         const err = 'speech-synthesis-unavailable';
         setTestAudioStatus('failed');
         setTestAudioMessage('SpeechSynthesis tidak didukung pada browser atau perangkat ini.');
         setLastErrorCode(err);
-        addDiagnosticLog('error', 'test-audio', err, 'SpeechSynthesis API tidak didukung browser ini', {
-          isPwa: isPwaMode(),
-        });
+        setLastFailureStage('api-unsupported');
+        setProcessStatus('API SpeechSynthesis tidak didukung');
+        addDiagnosticLog(
+          'error',
+          'test-audio',
+          err,
+          'SpeechSynthesis API tidak didukung browser ini',
+          { isPwa: isPwaMode() },
+          'api-unsupported'
+        );
         playChime(440, 0.3);
-        return false;
+        return Promise.resolve(false);
       }
 
-      // 3. Stop active recognition to prevent microphone audio session lock
+      // 3. Stop active recognition to prevent microphone audio hardware conflict
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
         } catch (e) {}
       }
 
-      // 4. Safely handle prior speech: only cancel if actively speaking/pending
+      // 4. Safely handle prior speech: Only cancel if active utterance exists
       try {
-        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        if (activeUtteranceRef.current && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
           window.speechSynthesis.cancel();
         }
         if (window.speechSynthesis.paused) {
@@ -616,62 +689,68 @@ export function useVoiceAssistant({
         }
       } catch (e) {}
 
-      // Grab voices (wait with bounded timeout if unpopulated)
-      let currentVoices: SpeechSynthesisVoice[] = [];
+      // 5. SYNCHRONOUSLY inspect voices without any async await
+      let freshVoices: SpeechSynthesisVoice[] = [];
       try {
-        currentVoices = window.speechSynthesis.getVoices() || [];
+        freshVoices = window.speechSynthesis.getVoices() || [];
       } catch (e) {}
-      if (currentVoices.length === 0 && availableVoices.length > 0) {
-        currentVoices = availableVoices;
+      if (freshVoices.length === 0 && availableVoices.length > 0) {
+        freshVoices = availableVoices;
       }
-      if (currentVoices.length === 0 && cachedVoices.length > 0) {
-        currentVoices = cachedVoices;
-      }
-      if (currentVoices.length === 0) {
-        currentVoices = await waitForVoices(500);
+      if (freshVoices.length === 0 && cachedVoices.length > 0) {
+        freshVoices = cachedVoices;
       }
 
-      const verifiedIndonesianVoice = forceDefaultVoice
-        ? null
-        : findIndonesianVoice(currentVoices) || selectedVoice;
+      const verifiedIndonesianVoice =
+        forceTier === 'indonesian-preferred' ? findIndonesianVoice(freshVoices) || selectedVoice : null;
 
-      addDiagnosticLog('info', 'test-audio', undefined, 'Memulai pengujian audio (TES SUARA)', {
-        isPwa: isPwaMode(),
-        voicesAvailable: currentVoices.length,
-        selectedVoice: verifiedIndonesianVoice ? `${verifiedIndonesianVoice.name} (${verifiedIndonesianVoice.lang})` : 'default',
-        forceDefaultVoice,
-      });
+      addDiagnosticLog(
+        'info',
+        'test-audio',
+        undefined,
+        `Memulai TES SUARA (Tier: ${forceTier}) - ${freshVoices.length} suara terdaftar`,
+        {
+          isPwa: isPwaMode(),
+          voicesCount: freshVoices.length,
+          selectedVoice: verifiedIndonesianVoice
+            ? `${verifiedIndonesianVoice.name} (${verifiedIndonesianVoice.lang})${verifiedIndonesianVoice.localService ? ' [Lokal]' : ' [Remote]'}`
+            : 'Tidak ada objek suara terikat (OS default)',
+          forceTier,
+        }
+      );
 
       return new Promise<boolean>((resolve) => {
-        let currentAttempt = forceDefaultVoice ? 2 : 1;
+        let attempt = forceTier === 'neutral' ? 3 : forceTier === 'system-id' ? 2 : 1;
         const maxAttempts = 3;
         let speechHasStarted = false;
 
-        const executeAttempt = (attempt: number) => {
+        const executeAttempt = (att: number) => {
           try {
             if (typeof window.SpeechSynthesisUtterance === 'undefined') {
-              throw new Error('SpeechSynthesisUtterance unavailable');
+              throw new Error('SpeechSynthesisUtterance tidak tersedia');
             }
 
             const utterance = new SpeechSynthesisUtterance(TEST_VOICE_PHRASE);
             utterance.rate = 1.0;
             utterance.pitch = 1.0;
 
-            if (attempt === 1) {
+            if (att === 1) {
               utterance.lang = 'id-ID';
               if (verifiedIndonesianVoice) {
                 utterance.voice = verifiedIndonesianVoice;
               }
-            } else if (attempt === 2) {
-              // Attempt 2: id-ID without setting voice object.
-              // Allows native OS synthesizer to speak without failing on remote Google TTS network errors
+            } else if (att === 2) {
+              // Attempt 2: id-ID WITHOUT setting voice object.
+              // Directly leverages native Android OS TextToSpeech without failing on remote Google TTS network errors
               utterance.lang = 'id-ID';
               utterance.voice = null;
             } else {
-              // Attempt 3: Standard system fallback
+              // Attempt 3: Standard neutral system fallback
               utterance.lang = '';
               utterance.voice = null;
             }
+
+            setProcessStatus(`Mengirim ke mesin TTS (Percobaan ${att})...`);
 
             utterance.onstart = () => {
               speechHasStarted = true;
@@ -683,14 +762,23 @@ export function useVoiceAssistant({
               setStatus('speaking');
               setTestAudioMessage('Sedang berbicara...');
               setLastErrorCode(null);
+              setLastFailureStage(null);
+              setProcessStatus(`Sedang berbicara (Percobaan ${att} berhasil mulai)`);
 
-              addDiagnosticLog('info', 'test-audio', undefined, `Tes audio mulai diputar (percobaan ${attempt})`, {
-                attempt,
-                voice: utterance.voice?.name || 'system-default',
-                lang: utterance.lang,
-              });
+              addDiagnosticLog(
+                'info',
+                'test-audio',
+                undefined,
+                `Tes suara mulai diputar oleh mesin (Percobaan ${att})`,
+                {
+                  attempt: att,
+                  voice: utterance.voice?.name || 'bawaan-sistem-os',
+                  lang: utterance.lang,
+                  isPwa: isPwaMode(),
+                }
+              );
 
-              // Periodic engine keepalive (prevents Chrome Android 15s freeze bug)
+              // Periodic keepalive (prevents Chrome Android 15-second freeze bug)
               if (keepAliveIntervalRef.current) clearInterval(keepAliveIntervalRef.current);
               keepAliveIntervalRef.current = setInterval(() => {
                 try {
@@ -720,13 +808,17 @@ export function useVoiceAssistant({
               setTestAudioStatus('completed');
               setStatus('done');
               setTestAudioMessage('Suara selesai.');
-              addDiagnosticLog('info', 'test-audio', undefined, 'Tes audio selesai diputar dengan sukses.');
+              setProcessStatus('Tes suara selesai diputar dengan sukses');
+              addDiagnosticLog('info', 'test-audio', undefined, 'Tes suara selesai diputar secara normal.');
               resolve(true);
             };
 
             utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
               const specificCode = e.error || 'unknown-error';
+              const stage: FailureStage = speechHasStarted ? 'failed-after-start' : 'failed-before-start';
+
               setLastErrorCode(specificCode);
+              setLastFailureStage(stage);
 
               if (e.error === 'canceled' || e.error === 'interrupted') {
                 releaseUtteranceRef(utterance);
@@ -736,24 +828,44 @@ export function useVoiceAssistant({
                 }
                 setTestAudioStatus('idle');
                 setTestAudioMessage(null);
-                addDiagnosticLog('info', 'test-audio', specificCode, `Tes suara dihentikan atau digantikan (${specificCode})`);
+                setProcessStatus(`Suara dihentikan atau diinterupsi (${specificCode})`);
+                addDiagnosticLog(
+                  'info',
+                  'test-audio',
+                  specificCode,
+                  `Tes suara dihentikan atau digantikan (${specificCode})`,
+                  undefined,
+                  stage
+                );
                 resolve(true);
                 return;
               }
 
-              addDiagnosticLog('error', 'test-audio', specificCode, `Tes audio gagal pada percobaan ${attempt}: [${specificCode}]`, {
-                attempt,
+              setProcessStatus(
+                `Gagal pada percobaan ${att} [${specificCode}] (${stage === 'failed-before-start' ? 'sebelum mulai' : 'setelah mulai'})`
+              );
+
+              addDiagnosticLog(
+                'error',
+                'test-audio',
                 specificCode,
-                voice: utterance.voice?.name || 'none',
-                lang: utterance.lang,
-                isPwa: isPwaMode(),
-              });
+                `Tes suara gagal pada percobaan ${att}: [${specificCode}] (${stage === 'failed-before-start' ? 'sebelum mulai / inisialisasi' : 'setelah mulai'})`,
+                {
+                  attempt: att,
+                  specificCode,
+                  stage,
+                  voice: utterance.voice?.name || 'none',
+                  lang: utterance.lang,
+                  isPwa: isPwaMode(),
+                },
+                stage
+              );
 
               releaseUtteranceRef(utterance);
 
               // Auto-fallback: If attempt 1 or 2 failed with synthesis-failed, language-unavailable, voice-unavailable, or not-allowed
               if (
-                attempt < maxAttempts &&
+                att < maxAttempts &&
                 (e.error === 'synthesis-failed' ||
                   e.error === 'voice-unavailable' ||
                   e.error === 'language-unavailable' ||
@@ -766,7 +878,7 @@ export function useVoiceAssistant({
                       window.speechSynthesis.resume();
                     }
                   } catch (err) {}
-                  executeAttempt(attempt + 1);
+                  executeAttempt(att + 1);
                 }, 40);
                 return;
               }
@@ -785,11 +897,13 @@ export function useVoiceAssistant({
               setTestAudioStatus('failed');
               setTestAudioMessage(
                 e.error === 'synthesis-failed'
-                  ? 'Gagal memutar suara (synthesis-failed: mesin TTS tidak merespons).'
+                  ? 'Gagal memutar suara (synthesis-failed: mesin TTS OS tidak merespons atau paket suara Indonesia belum terpasang di HP).'
                   : e.error === 'not-allowed'
                   ? 'Gagal memutar suara (not-allowed: izin audio dibatasi kebijakan browser).'
                   : `Gagal memutar suara (${e.error || 'error'}).`
               );
+
+              // Play acoustic harmonic chime as audible confirmation of audio hardware working
               playChime(523, 0.25);
               resolve(false);
             };
@@ -797,7 +911,7 @@ export function useVoiceAssistant({
             activeUtteranceRef.current = utterance;
             holdUtteranceRef(utterance);
 
-            // Execute speech
+            // Execute speech SYNCHRONOUSLY within event handler!
             window.speechSynthesis.speak(utterance);
 
             if (window.speechSynthesis.paused) {
@@ -814,7 +928,7 @@ export function useVoiceAssistant({
               } catch (e) {}
             }, 800);
 
-            // Resilient Watchdog: 7 seconds timeout (allows mobile TTS engines time to load voice models)
+            // Resilient Watchdog: 6 seconds timeout
             if (testWatchdogRef.current) clearTimeout(testWatchdogRef.current);
             testWatchdogRef.current = setTimeout(() => {
               if (testTickIntervalRef.current) {
@@ -825,35 +939,56 @@ export function useVoiceAssistant({
               if (!speechHasStarted) {
                 const timeoutCode = 'timeout-engine-unresponsive';
                 setLastErrorCode(timeoutCode);
+                setLastFailureStage('timeout-unresponsive');
+                setProcessStatus('Waktu habis: Mesin suara tidak merespons (Watchdog 6s)');
 
-                addDiagnosticLog('warn', 'watchdog', timeoutCode, `Watchdog timeout setelah 7 detik pada percobaan ${attempt}`, {
-                  attempt,
-                  isPwa: isPwaMode(),
-                  speaking: window.speechSynthesis.speaking,
-                  paused: window.speechSynthesis.paused,
-                });
+                addDiagnosticLog(
+                  'warn',
+                  'watchdog',
+                  timeoutCode,
+                  `Watchdog timeout setelah 6 detik pada percobaan ${att}`,
+                  {
+                    attempt: att,
+                    isPwa: isPwaMode(),
+                    speaking: window.speechSynthesis.speaking,
+                    paused: window.speechSynthesis.paused,
+                  },
+                  'timeout-unresponsive'
+                );
 
-                if (attempt < maxAttempts) {
+                if (att < maxAttempts) {
                   try {
                     window.speechSynthesis.cancel();
                   } catch (e) {}
-                  executeAttempt(attempt + 1);
+                  executeAttempt(att + 1);
                   return;
                 }
 
                 setTestAudioStatus('failed');
-                setTestAudioMessage('Gagal memutar suara (mesin suara perangkat membutuhkan waktu terlalu lama).');
+                setTestAudioMessage(
+                  'Gagal memutar suara (mesin suara perangkat membutuhkan waktu terlalu lama).'
+                );
                 playChime(523, 0.25);
                 resolve(false);
               }
-            }, 7000);
+            }, 6000);
           } catch (initErr: any) {
             const errCode = 'invocation-exception';
             setLastErrorCode(errCode);
-            addDiagnosticLog('error', 'test-audio', errCode, `Pengecualian inisialisasi pada percobaan ${attempt}: ${initErr?.message || initErr}`);
+            setLastFailureStage('failed-before-start');
+            setProcessStatus(`Pengecualian inisialisasi pada percobaan ${att}`);
 
-            if (attempt < maxAttempts) {
-              executeAttempt(attempt + 1);
+            addDiagnosticLog(
+              'error',
+              'test-audio',
+              errCode,
+              `Pengecualian inisialisasi pada percobaan ${att}: ${initErr?.message || initErr}`,
+              undefined,
+              'failed-before-start'
+            );
+
+            if (att < maxAttempts) {
+              executeAttempt(att + 1);
             } else {
               setTestAudioStatus('failed');
               setTestAudioMessage('Gagal memutar suara.');
@@ -863,8 +998,8 @@ export function useVoiceAssistant({
           }
         };
 
-        // Start execution
-        executeAttempt(currentAttempt);
+        // Execute immediately and synchronously
+        executeAttempt(attempt);
       });
     },
     [availableVoices, selectedVoice, addDiagnosticLog]
@@ -880,6 +1015,7 @@ export function useVoiceAssistant({
       // 1. Check if speech is enabled by user
       if (!speechEnabled) {
         addDiagnosticLog('info', 'speak-response', undefined, 'Pembacaan suara dilewati karena dinonaktifkan oleh pengguna');
+        setProcessStatus('Suara dilewati (Pengaturan Suara: OFF)');
         return false;
       }
 
@@ -887,7 +1023,16 @@ export function useVoiceAssistant({
       if (!isSpeechSynthesisAvailable()) {
         const err = 'speech-synthesis-unavailable';
         setLastErrorCode(err);
-        addDiagnosticLog('warn', 'speak-response', err, 'SpeechSynthesis tidak didukung di lingkungan ini. Membunyikan melodi akustik.');
+        setLastFailureStage('api-unsupported');
+        setProcessStatus('SpeechSynthesis tidak didukung browser ini');
+        addDiagnosticLog(
+          'warn',
+          'speak-response',
+          err,
+          'SpeechSynthesis tidak didukung di lingkungan ini. Membunyikan melodi akustik.',
+          undefined,
+          'api-unsupported'
+        );
         playMelodicChime();
         return false;
       }
@@ -917,7 +1062,7 @@ export function useVoiceAssistant({
 
       // 5. Pre-flight initialization: Safely reset active speech queue
       try {
-        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        if (activeUtteranceRef.current && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
           window.speechSynthesis.cancel();
         }
         if (window.speechSynthesis.paused) {
@@ -928,24 +1073,28 @@ export function useVoiceAssistant({
       // Play soft chime for immediate sensory confirmation
       playChime(659, 0.15);
 
-      // 6. Inspect voices (robust wait for 'voiceschanged' if unpopulated)
-      let voices = window.speechSynthesis.getVoices();
-      if (!voices || voices.length === 0) {
-        if (availableVoices.length > 0) {
-          voices = availableVoices;
-        } else if (cachedVoices.length > 0) {
-          voices = cachedVoices;
-        } else {
-          voices = await waitForVoices(600);
-        }
+      // 6. Inspect voices (synchronous grab, fallback to cache)
+      let voices: SpeechSynthesisVoice[] = [];
+      try {
+        voices = window.speechSynthesis.getVoices() || [];
+      } catch (e) {}
+      if (voices.length === 0 && availableVoices.length > 0) {
+        voices = availableVoices;
+      }
+      if (voices.length === 0 && cachedVoices.length > 0) {
+        voices = cachedVoices;
       }
 
       const verifiedIndonesianVoice = findIndonesianVoice(voices) || selectedVoice;
 
+      setProcessStatus('Menyiapkan pembacaan jadwal...');
+
       addDiagnosticLog('info', 'speak-response', undefined, `Memulai sintesis ucapan (${cleanText.length} karakter)`, {
         isPwa: isPwaMode(),
         voicesCount: voices.length,
-        selectedVoice: verifiedIndonesianVoice ? `${verifiedIndonesianVoice.name} (${verifiedIndonesianVoice.lang})` : 'default',
+        selectedVoice: verifiedIndonesianVoice
+          ? `${verifiedIndonesianVoice.name} (${verifiedIndonesianVoice.lang})`
+          : 'Bawaan Sistem OS (id-ID)',
         textPreview: cleanText.slice(0, 60),
       });
 
@@ -992,10 +1141,12 @@ export function useVoiceAssistant({
               setStatus('speaking');
               setErrorMessage(null);
               setLastErrorCode(null);
+              setLastFailureStage(null);
+              setProcessStatus(`Membacakan jawaban (Percobaan ${attempt})`);
 
               addDiagnosticLog('info', 'speak-response', undefined, `Sintesis ucapan mulai diputar (percobaan ${attempt})`, {
                 attempt,
-                voice: utterance.voice?.name || 'system-default',
+                voice: utterance.voice?.name || 'bawaan-sistem-os',
               });
 
               // Periodic keepalive to fix Chrome 15s freeze bug
@@ -1022,6 +1173,7 @@ export function useVoiceAssistant({
               activeUtteranceRef.current = null;
               setAutoplayBlocked(false);
               setStatus('done');
+              setProcessStatus('Jawaban selesai dibacakan');
               addDiagnosticLog('info', 'speak-response', undefined, 'Sintesis ucapan selesai diputar.');
               resolve(true);
             };
@@ -1039,26 +1191,45 @@ export function useVoiceAssistant({
               activeUtteranceRef.current = null;
 
               const errorCode = event.error || 'unknown-error';
+              const stage: FailureStage = startedSpeaking ? 'failed-after-start' : 'failed-before-start';
+
               setLastErrorCode(errorCode);
+              setLastFailureStage(stage);
+              setProcessStatus(`Gagal membacakan ucapan [${errorCode}]`);
 
               if (event.error === 'canceled' || event.error === 'interrupted') {
                 setStatus('done');
-                addDiagnosticLog('info', 'speak-response', errorCode, `Sintesis ucapan dibatalkan/diinterupsi (${errorCode})`);
+                addDiagnosticLog('info', 'speak-response', errorCode, `Sintesis ucapan dibatalkan/diinterupsi (${errorCode})`, undefined, stage);
                 resolve(true);
                 return;
               }
 
-              addDiagnosticLog('error', 'speak-response', errorCode, `Kesalahan sintesis suara pada percobaan ${attempt}: [${errorCode}]`, {
-                attempt,
+              addDiagnosticLog(
+                'error',
+                'speak-response',
                 errorCode,
-                isPwa: isPwaMode(),
-                voice: utterance.voice?.name || 'none',
-              });
+                `Kesalahan sintesis suara pada percobaan ${attempt}: [${errorCode}] (${stage === 'failed-before-start' ? 'sebelum mulai' : 'setelah mulai'})`,
+                {
+                  attempt,
+                  errorCode,
+                  stage,
+                  isPwa: isPwaMode(),
+                  voice: utterance.voice?.name || 'none',
+                },
+                stage
+              );
 
               // Check if browser blocked due to autoplay policy
               if (event.error === 'not-allowed') {
                 setAutoplayBlocked(true);
-                addDiagnosticLog('warn', 'autoplay-check', 'not-allowed', 'Pemutaran diblokir oleh kebijakan Autoplay browser/PWA. Pengguna dapat menekan tombol BACA JAWABAN.');
+                addDiagnosticLog(
+                  'warn',
+                  'autoplay-check',
+                  'not-allowed',
+                  'Pemutaran diblokir oleh kebijakan Autoplay browser/PWA. Pengguna dapat menekan tombol BACA JAWABAN.',
+                  undefined,
+                  stage
+                );
               }
 
               // Retry next fallback tier for common speech synthesis failure codes
@@ -1105,11 +1276,21 @@ export function useVoiceAssistant({
                   if (!startedSpeaking && !window.speechSynthesis.speaking) {
                     const blockCode = 'autoplay-watchdog-suppressed';
                     setLastErrorCode(blockCode);
-                    addDiagnosticLog('warn', 'watchdog', blockCode, 'Pemutaran audio tidak dimulai dalam batas waktu. Browser kemungkinan menahan pemutaran otomatis (PWA Autoplay Policy).', {
-                      isPwa: isPwaMode(),
-                      paused: window.speechSynthesis.paused,
-                      speaking: window.speechSynthesis.speaking,
-                    });
+                    setLastFailureStage('timeout-unresponsive');
+                    setProcessStatus('Pemutaran otomatis ditahan browser (Klik BACA JAWABAN)');
+
+                    addDiagnosticLog(
+                      'warn',
+                      'watchdog',
+                      blockCode,
+                      'Pemutaran audio tidak dimulai dalam batas waktu. Browser kemungkinan menahan pemutaran otomatis (PWA Autoplay Policy).',
+                      {
+                        isPwa: isPwaMode(),
+                        paused: window.speechSynthesis.paused,
+                        speaking: window.speechSynthesis.speaking,
+                      },
+                      'timeout-unresponsive'
+                    );
                     setAutoplayBlocked(true);
                     setStatus('done');
                   }
@@ -1119,7 +1300,17 @@ export function useVoiceAssistant({
           } catch (initErr: any) {
             const errCode = 'speak-invocation-error';
             setLastErrorCode(errCode);
-            addDiagnosticLog('error', 'speak-response', errCode, `Gagal memanggil speechSynthesis.speak pada percobaan ${attempt}: ${initErr?.message || initErr}`);
+            setLastFailureStage('failed-before-start');
+            setProcessStatus('Pengecualian pemanggilan sintesis ucapan');
+
+            addDiagnosticLog(
+              'error',
+              'speak-response',
+              errCode,
+              `Gagal memanggil speechSynthesis.speak pada percobaan ${attempt}: ${initErr?.message || initErr}`,
+              undefined,
+              'failed-before-start'
+            );
 
             if (attempt < maxAttempts) {
               setTimeout(executeSpeech, 40);
@@ -1132,7 +1323,8 @@ export function useVoiceAssistant({
           }
         };
 
-        setTimeout(executeSpeech, 30);
+        // Call immediately
+        executeSpeech();
       });
     },
     [speechEnabled, selectedVoice, availableVoices, addDiagnosticLog]
@@ -1145,6 +1337,7 @@ export function useVoiceAssistant({
     if (responseMessage) {
       primeAudio();
       setAutoplayBlocked(false);
+      setProcessStatus('Mengulang pembacaan jawaban...');
       addDiagnosticLog('info', 'speak-response', undefined, 'Mengulang pembacaan jawaban (Repeat Response)');
       speakResponse(responseMessage);
     }
@@ -1157,14 +1350,16 @@ export function useVoiceAssistant({
   const startListening = useCallback(() => {
     primeAudio();
     setAutoplayBlocked(false);
+    setProcessStatus('Mendengarkan ucapan mikrofon...');
 
     if (!isSpeechRecognitionAvailable()) {
       setIsRecognitionSupported(false);
       setStatus('error');
       const err = 'speech-recognition-unsupported';
       setLastErrorCode(err);
+      setLastFailureStage('api-unsupported');
       setErrorMessage('Browser Anda tidak mendukung Web Speech Recognition. Gunakan tombol Ketik Manual.');
-      addDiagnosticLog('error', 'recognition', err, 'SpeechRecognition tidak didukung browser ini');
+      addDiagnosticLog('error', 'recognition', err, 'SpeechRecognition tidak didukung browser ini', undefined, 'api-unsupported');
       return;
     }
 
@@ -1189,6 +1384,7 @@ export function useVoiceAssistant({
         setTranscript('');
         setErrorMessage(null);
         playChime(880, 0.1);
+        setProcessStatus('Mikrofon aktif: Silakan berbicara...');
         addDiagnosticLog('info', 'recognition', undefined, 'Mendengarkan suara pengguna...');
       };
 
@@ -1202,6 +1398,7 @@ export function useVoiceAssistant({
 
           setTranscript(speechResult);
           setStatus('searching');
+          setProcessStatus(`Perintah diterima: "${speechResult}"`);
           addDiagnosticLog('info', 'recognition', undefined, `Perintah suara dikenali: "${speechResult}"`);
           if (onCommandRecognized) {
             onCommandRecognized(speechResult);
@@ -1212,6 +1409,7 @@ export function useVoiceAssistant({
       recognition.onerror = (event: any) => {
         const recogErr = event.error || 'recognition-error';
         setLastErrorCode(recogErr);
+        setProcessStatus(`Error mikrofon: [${recogErr}]`);
         addDiagnosticLog('warn', 'recognition', recogErr, `Kesalahan SpeechRecognition: [${recogErr}]`);
 
         if (event.error === 'not-allowed') {
@@ -1235,7 +1433,9 @@ export function useVoiceAssistant({
     } catch (e: any) {
       const err = 'mic-access-exception';
       setLastErrorCode(err);
-      addDiagnosticLog('error', 'recognition', err, `Gagal memulai mikrofon: ${e?.message || e}`);
+      setLastFailureStage('failed-before-start');
+      setProcessStatus('Tidak dapat mengakses mikrofon');
+      addDiagnosticLog('error', 'recognition', err, `Gagal memulai mikrofon: ${e?.message || e}`, undefined, 'failed-before-start');
       setStatus('error');
       setErrorMessage('Tidak dapat mengakses mikrofon. Periksa izin perangkat.');
     }
@@ -1252,6 +1452,7 @@ export function useVoiceAssistant({
     }
     stopSpeaking();
     setStatus('idle');
+    setProcessStatus('Mendengarkan dibatalkan');
     addDiagnosticLog('info', 'recognition', undefined, 'Mendengarkan dihentikan oleh pengguna');
   }, [stopSpeaking, addDiagnosticLog]);
 
@@ -1266,12 +1467,16 @@ export function useVoiceAssistant({
     isPwa,
     errorMessage,
     availableVoices,
+    voiceLanguages,
+    hasIndonesianVoice,
     selectedVoice,
     testAudioStatus,
     testAudioMessage,
     autoplayBlocked,
     diagnosticLogs,
     lastErrorCode,
+    lastFailureStage,
+    processStatus,
     setAutoplayBlocked,
     setSpeechEnabled,
     setTranscript,
