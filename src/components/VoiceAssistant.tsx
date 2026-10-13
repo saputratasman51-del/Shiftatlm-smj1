@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { ShiftAssignment, Shift } from '../types';
 import { dataService, getPontianakDateString } from '../services/dataService';
-import { useVoiceAssistant, VoiceAssistantStatus } from '../hooks/useVoiceAssistant';
+import { useVoiceAssistant, VoiceAssistantStatus, primeAudio } from '../hooks/useVoiceAssistant';
 
 interface VoiceAssistantProps {
   activeProfileId: string;
@@ -284,6 +284,7 @@ export function VoiceAssistant({
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!textInputFallback.trim()) return;
+    primeAudio();
     const submitted = textInputFallback.trim();
     setTranscript(submitted);
     setTextInputFallback('');
@@ -291,11 +292,13 @@ export function VoiceAssistant({
   };
 
   const handleTestSampleCommand = (sample: string) => {
+    primeAudio();
     setTranscript(sample);
     handleProcessCommand(sample);
   };
 
   const handleTestSpeakerSound = () => {
+    primeAudio();
     const greeting = `Halo ${activeProfileName}, fitur suara bahasa Indonesia di aplikasi Shift ATLM RSUD Sultan Muhammad Jamaludin Satu siap digunakan.`;
     setResponseMessage(greeting);
     speakResponse(greeting);
@@ -583,7 +586,10 @@ export function VoiceAssistant({
                 <span>{errorMessage}</span>
               </div>
               <button
-                onClick={startListening}
+                onClick={() => {
+                  setErrorMessage(null);
+                  startListening();
+                }}
                 className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold rounded-lg transition shrink-0 cursor-pointer"
               >
                 Coba Lagi

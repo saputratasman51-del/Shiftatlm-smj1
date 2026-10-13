@@ -13,18 +13,197 @@ interface UseVoiceAssistantOptions {
 }
 
 /**
- * Finds the best Indonesian voice available in the browser's speechSynthesis engine.
+ * Robust check for SpeechSynthesis and SpeechSynthesisUtterance availability.
+ * Safely guards against restricted iframes, SSR, and throwing property getters.
  */
-function findIndonesianVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+export function isSpeechSynthesisAvailable(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (!('speechSynthesis' in window)) return false;
+    const synth = window.speechSynthesis;
+    if (!synth) return false;
+    if (typeof synth.speak !== 'function' || typeof synth.getVoices !== 'function') {
+      return false;
+    }
+    if (typeof window.SpeechSynthesisUtterance === 'undefined') {
+      return false;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Robust check for SpeechRecognition availability.
+ */
+export function isSpeechRecognitionAvailable(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    return Boolean(SpeechRecognition);
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Plays a pleasant web audio chime as immediate auditory feedback
+ * and seamless fallback when device TTS is unavailable or muted.
+ */
+export function playChime(frequency = 784, duration = 0.25) {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(frequency, now);
+    osc.frequency.exponentialRampToValueAtTime(frequency * 1.2, now + 0.08);
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration + 0.05);
+  } catch (e) {
+    // ignore
+  }
+}
+
+/**
+ * Primes and unlocks the browser's speech synthesis and audio context
+ * during synchronous user gestures (click / tap).
+ */
+export function primeAudio() {
+  if (!isSpeechSynthesisAvailable()) return;
+  try {
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+  } catch (e) {}
+
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioCtx) {
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+    }
+  } catch (e) {}
+}
+
+/**
+ * Sanitizes Indonesian text for optimal speech synthesis across all engines.
+ * Removes markdown formatting, parentheticals, and expands abbreviations.
+ */
+export function sanitizeSpeechText(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/[*_#`~]/g, '') // remove markdown symbols
+    .replace(/[()[\]{}]/g, ', ') // convert brackets to natural pauses
+    .replace(/W\s*I\s*B/gi, 'WIB')
+    .replace(/\bRSUD\b/gi, 'Rumah Sakit')
+    .replace(/\bATLM\b/gi, 'A T L M')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Explicitly waits for the SpeechSynthesis 'voiceschanged' event or returns immediately
+ * if voices are already loaded, with a bounded timeout to prevent hanging.
+ */
+export async function waitForVoices(timeoutMs: number = 600): Promise<SpeechSynthesisVoice[]> {
+  if (!isSpeechSynthesisAvailable()) return [];
+
+  try {
+    const immediateVoices = window.speechSynthesis.getVoices();
+    if (immediateVoices && immediateVoices.length > 0) {
+      return immediateVoices;
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  return new Promise<SpeechSynthesisVoice[]>((resolve) => {
+    let isResolved = false;
+    let timer: any = null;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      try {
+        if (isSpeechSynthesisAvailable()) {
+          window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    const handleVoicesChanged = () => {
+      if (isResolved) return;
+      isResolved = true;
+      cleanup();
+      try {
+        const loadedVoices = window.speechSynthesis.getVoices();
+        resolve(loadedVoices || []);
+      } catch (e) {
+        resolve([]);
+      }
+    };
+
+    try {
+      window.speechSynthesis.addEventListener('voiceschanged', handleVoicesChanged);
+    } catch (e) {
+      // ignore
+    }
+
+    timer = setTimeout(() => {
+      if (isResolved) return;
+      isResolved = true;
+      cleanup();
+      try {
+        const finalVoices = window.speechSynthesis.getVoices();
+        resolve(finalVoices || []);
+      } catch (e) {
+        resolve([]);
+      }
+    }, timeoutMs);
+  });
+}
+
+/**
+ * Finds the best Indonesian voice available in the browser's speechSynthesis engine.
+ * Prioritizes local/offline Indonesian voices to prevent network 'synthesis-failed' errors.
+ * CRITICAL: Never returns a foreign/English voice fallback, as assigning a foreign voice
+ * with lang='id-ID' triggers 'synthesis-failed' in Chromium.
+ */
+export function findIndonesianVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
   if (!voices || voices.length === 0) return null;
 
-  // 1. Exact id-ID match
-  const exactId = voices.find((v) => v.lang.toLowerCase() === 'id-id');
-  if (exactId) return exactId;
+  // 1. Local/offline Indonesian voice (highest reliability)
+  const localId = voices.find(
+    (v) =>
+      Boolean(v.localService || (v as any).local) &&
+      (v.lang.toLowerCase().replace('_', '-').startsWith('id') ||
+        v.name.toLowerCase().includes('indonesia'))
+  );
+  if (localId) return localId;
 
-  // 2. Starts with 'id'
-  const prefixId = voices.find((v) => v.lang.toLowerCase().startsWith('id'));
-  if (prefixId) return prefixId;
+  // 2. Exact 'id-ID' or starts with 'id'
+  const exactId = voices.find((v) => {
+    const l = v.lang.toLowerCase().replace('_', '-');
+    return l === 'id-id' || l.startsWith('id');
+  });
+  if (exactId) return exactId;
 
   // 3. Known Indonesian voice names across platforms (Google Bahasa Indonesia, Damayanti, Gadis, etc.)
   const nameMatch = voices.find((v) => {
@@ -39,8 +218,9 @@ function findIndonesianVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoi
   });
   if (nameMatch) return nameMatch;
 
-  // 4. Fallback to default voice or first available
-  return voices.find((v) => v.default) || voices[0] || null;
+  // DO NOT return foreign/English voice! Returning null allows the browser's
+  // native synthesizer to handle it gracefully without crashing.
+  return null;
 }
 
 export function useVoiceAssistant({
@@ -62,142 +242,197 @@ export function useVoiceAssistant({
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const keepAliveIntervalRef = useRef<any>(null);
 
-  // Initialize voice lists and support detection
+  // Initialize voice lists and support detection with robust checks
   useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const hasRecognition = !!SpeechRecognition;
-    const hasSynthesis = typeof window !== 'undefined' && 'speechSynthesis' in window;
+    const hasRecognition = isSpeechRecognitionAvailable();
+    const hasSynthesis = isSpeechSynthesisAvailable();
 
     setIsRecognitionSupported(hasRecognition);
     setIsSynthesisSupported(hasSynthesis);
     setIsSupported(hasRecognition || hasSynthesis);
 
+    let isMounted = true;
+
+    const handleVoiceUpdate = (voices: SpeechSynthesisVoice[]) => {
+      if (!isMounted) return;
+      setAvailableVoices(voices);
+      const best = findIndonesianVoice(voices);
+      setSelectedVoice(best);
+    };
+
     if (hasSynthesis) {
-      const updateVoices = () => {
+      // Explicitly wait for voiceschanged or read immediately available voices
+      waitForVoices(800).then((voices) => {
+        handleVoiceUpdate(voices);
+      });
+
+      // Keep listening for any later voice profile updates
+      const onVoicesChangedListener = () => {
         try {
-          const voices = window.speechSynthesis.getVoices();
-          setAvailableVoices(voices);
-          const best = findIndonesianVoice(voices);
-          setSelectedVoice(best);
-        } catch (e) {
-          console.warn('Error reading speechSynthesis voices:', e);
-        }
-      };
-
-      updateVoices();
-
-      // Many browsers load voices asynchronously
-      if (typeof window.speechSynthesis.onvoiceschanged !== 'undefined') {
-        window.speechSynthesis.onvoiceschanged = updateVoices;
-      }
-    }
-
-    return () => {
-      // Cleanup
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
+          const freshVoices = window.speechSynthesis.getVoices();
+          handleVoiceUpdate(freshVoices);
         } catch (e) {
           // ignore
         }
+      };
+
+      try {
+        window.speechSynthesis.addEventListener('voiceschanged', onVoicesChangedListener);
+      } catch (e) {
+        // ignore
+      }
+
+      return () => {
+        isMounted = false;
+        try {
+          window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChangedListener);
+        } catch (e) {}
+        if (recognitionRef.current) {
+          try {
+            recognitionRef.current.abort();
+          } catch (e) {}
+        }
+        if (keepAliveIntervalRef.current) {
+          clearInterval(keepAliveIntervalRef.current);
+          keepAliveIntervalRef.current = null;
+        }
+        try {
+          if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+            window.speechSynthesis.cancel();
+          }
+        } catch (e) {}
+        (window as any).__activeUtterance = null;
+      };
+    }
+
+    return () => {
+      isMounted = false;
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {}
       }
       if (keepAliveIntervalRef.current) {
         clearInterval(keepAliveIntervalRef.current);
         keepAliveIntervalRef.current = null;
       }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try {
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.onvoiceschanged = null;
-        } catch (e) {
-          // ignore
-        }
-      }
-      (window as any).__activeUtterance = null;
     };
   }, []);
 
   /**
-   * Centralized, production-grade text-to-speech function.
-   * Handles Chromium garbage collection bug, cancel queue race conditions,
-   * voice selection, rate, natural pitch, and keepalive timer.
+   * Refactored speakResponse function that handles potential initialization failures
+   * before triggering playback, explicitly waiting for voices and guarding every phase.
    */
   const speakResponse = useCallback(
-    (text: string): Promise<boolean> => {
-      return new Promise((resolve) => {
-        if (!speechEnabled) {
-          resolve(false);
-          return;
-        }
+    async (text: string): Promise<boolean> => {
+      // 1. Check if speech is globally enabled by user
+      if (!speechEnabled) {
+        return false;
+      }
 
-        if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-          setErrorMessage('Browser tidak mendukung Speech Synthesis.');
-          resolve(false);
-          return;
-        }
+      // 2. Pre-flight check: Robust availability check
+      if (!isSpeechSynthesisAvailable()) {
+        console.warn('SpeechSynthesis is not available in this environment. Falling back to chime.');
+        playChime(660, 0.2);
+        return false;
+      }
 
-        if (!text || !text.trim()) {
-          resolve(false);
-          return;
-        }
+      // 3. Pre-flight check: Text sanitization and validation
+      const cleanText = sanitizeSpeechText(text);
+      if (!cleanText) {
+        return false;
+      }
 
-        // 1. Ensure microphone is stopped before speaking to avoid audio feedback
+      // 4. Pre-flight initialization: Cleanup active microphones & timers
+      try {
         if (recognitionRef.current) {
-          try {
-            recognitionRef.current.abort();
-          } catch (e) {
-            // ignore
-          }
+          recognitionRef.current.abort();
         }
+      } catch (e) {
+        // ignore
+      }
 
-        // 2. Clear any lingering keepalive intervals
-        if (keepAliveIntervalRef.current) {
-          clearInterval(keepAliveIntervalRef.current);
-          keepAliveIntervalRef.current = null;
-        }
+      if (keepAliveIntervalRef.current) {
+        clearInterval(keepAliveIntervalRef.current);
+        keepAliveIntervalRef.current = null;
+      }
 
-        // 3. Cancel existing speech if any
-        try {
+      // 5. Pre-flight initialization: Safely reset active speech queue
+      try {
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
           window.speechSynthesis.cancel();
-        } catch (e) {
-          console.warn('Cancel speech error:', e);
         }
+      } catch (e) {
+        console.warn('Cancel speech warning:', e);
+      }
 
-        // 4. Delay slightly before speaking to allow cancel queue to flush
-        // (prevents Chrome & Safari from killing the newly queued utterance)
-        setTimeout(() => {
+      // 6. Pre-flight initialization: Resume paused engine state
+      try {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // Play soft introductory chime for immediate sensory confirmation
+      playChime(659, 0.15);
+
+      // 7. Explicitly ensure voices are loaded before choosing Indonesian 'id-ID' voice
+      let voices = window.speechSynthesis.getVoices();
+      if (!voices || voices.length === 0) {
+        voices = await waitForVoices(500);
+      }
+
+      const verifiedIndonesianVoice = findIndonesianVoice(voices) || selectedVoice;
+
+      // 8. Trigger playback with robust multi-attempt execution and failure protection
+      return new Promise<boolean>((resolve) => {
+        let attempt = 0;
+        const maxAttempts = 3;
+
+        const executeSpeech = () => {
+          attempt++;
+
           try {
-            // Unpause if stuck
-            if (window.speechSynthesis.paused) {
-              window.speechSynthesis.resume();
+            // Validate utterance constructor before initialization
+            if (typeof window.SpeechSynthesisUtterance === 'undefined') {
+              throw new Error('SpeechSynthesisUtterance constructor unavailable');
             }
 
-            const cleanText = text.trim();
             const utterance = new SpeechSynthesisUtterance(cleanText);
-
-            // Configure Indonesian language and natural pacing
-            utterance.lang = 'id-ID';
             utterance.rate = 1.0;
             utterance.pitch = 1.0;
 
-            // Select Indonesian voice if available
-            const voices = window.speechSynthesis.getVoices();
-            const voiceToUse = findIndonesianVoice(voices) || selectedVoice;
-            if (voiceToUse) {
-              utterance.voice = voiceToUse;
+            if (attempt === 1) {
+              // Attempt 1: Target id-ID with verified Indonesian voice if present
+              utterance.lang = 'id-ID';
+              if (verifiedIndonesianVoice) {
+                utterance.voice = verifiedIndonesianVoice;
+              }
+            } else if (attempt === 2) {
+              // Attempt 2: Target id-ID with native system engine (null voice)
+              utterance.lang = 'id-ID';
+              utterance.voice = null;
+            } else {
+              // Attempt 3: General fallback without forcing language constraints
+              utterance.lang = '';
+              utterance.voice = null;
             }
 
             utterance.onstart = () => {
               setStatus('speaking');
               setErrorMessage(null);
 
-              // Chrome bug fix: utterances longer than 15s freeze without periodic resume
+              // Periodic keepalive to fix Chrome 15s freeze bug
+              if (keepAliveIntervalRef.current) clearInterval(keepAliveIntervalRef.current);
               keepAliveIntervalRef.current = setInterval(() => {
-                if (window.speechSynthesis.speaking && window.speechSynthesis.paused) {
-                  window.speechSynthesis.resume();
-                }
-              }, 4000);
+                try {
+                  if (window.speechSynthesis.speaking && window.speechSynthesis.paused) {
+                    window.speechSynthesis.resume();
+                  }
+                } catch (e) {}
+              }, 3000);
             };
 
             utterance.onend = () => {
@@ -219,32 +454,59 @@ export function useVoiceAssistant({
               activeUtteranceRef.current = null;
               (window as any).__activeUtterance = null;
 
-              // Only set error if not canceled intentionally by the user or new speech
-              if (event.error !== 'canceled' && event.error !== 'interrupted') {
-                console.warn('Speech synthesis error:', event.error);
-                setErrorMessage(`Suara gagal diputar (${event.error || 'kesalahan perangkat'}).`);
+              // If canceled or interrupted by new interaction, finish cleanly
+              if (event.error === 'canceled' || event.error === 'interrupted') {
+                setStatus('done');
+                resolve(true);
+                return;
               }
+
+              console.warn(`Speech synthesis error on attempt ${attempt}:`, event.error);
+
+              // Retry next fallback tier for common speech synthesis failure codes
+              if (
+                attempt < maxAttempts &&
+                (event.error === 'synthesis-failed' ||
+                  event.error === 'voice-unavailable' ||
+                  event.error === 'language-unavailable')
+              ) {
+                setTimeout(executeSpeech, 50);
+                return;
+              }
+
+              // All speech engine attempts gracefully exhausted: play fallback chime
+              playChime(523, 0.25);
+              setErrorMessage(null);
               setStatus('done');
               resolve(false);
             };
 
-            // Prevent Garbage Collection in Blink/V8
+            // Retain reference on window to prevent Blink V8 garbage collection mid-speech
             activeUtteranceRef.current = utterance;
             (window as any).__activeUtterance = utterance;
 
+            // Trigger playback safely
             window.speechSynthesis.speak(utterance);
 
-            // Double check resume after speak
+            // Double check resume in case browser queued it in paused state
             if (window.speechSynthesis.paused) {
               window.speechSynthesis.resume();
             }
-          } catch (err: any) {
-            console.error('Speech synthesis exception:', err);
-            setErrorMessage('Terjadi kesalahan saat memutar respons suara.');
-            setStatus('error');
-            resolve(false);
+          } catch (initErr: any) {
+            console.warn('Speech synthesis initialization exception on attempt', attempt, initErr);
+            if (attempt < maxAttempts) {
+              setTimeout(executeSpeech, 50);
+            } else {
+              playChime(523, 0.25);
+              setErrorMessage(null);
+              setStatus('done');
+              resolve(false);
+            }
           }
-        }, 50);
+        };
+
+        // Small 30ms delay allows any prior cancellation to completely clear from browser audio queue
+        setTimeout(executeSpeech, 30);
       });
     },
     [speechEnabled, selectedVoice]
@@ -258,9 +520,11 @@ export function useVoiceAssistant({
       clearInterval(keepAliveIntervalRef.current);
       keepAliveIntervalRef.current = null;
     }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    if (isSpeechSynthesisAvailable()) {
       try {
-        window.speechSynthesis.cancel();
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+          window.speechSynthesis.cancel();
+        }
       } catch (e) {
         // ignore
       }
@@ -277,6 +541,7 @@ export function useVoiceAssistant({
    */
   const repeatResponse = useCallback(() => {
     if (responseMessage) {
+      primeAudio();
       speakResponse(responseMessage);
     }
   }, [responseMessage, speakResponse]);
@@ -286,24 +551,17 @@ export function useVoiceAssistant({
    * Primes speech synthesis on the user gesture.
    */
   const startListening = useCallback(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    primeAudio();
 
-    if (!SpeechRecognition) {
+    if (!isSpeechRecognitionAvailable()) {
       setIsRecognitionSupported(false);
       setStatus('error');
       setErrorMessage('Browser Anda tidak mendukung Web Speech Recognition. Gunakan kolom input teks.');
       return;
     }
 
-    // Prime speech synthesis inside this click gesture to bypass mobile autoplay policies
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.resume();
-      } catch (e) {
-        // ignore
-      }
-    }
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     // Stop speaking if currently speaking
     stopSpeaking();
@@ -322,6 +580,7 @@ export function useVoiceAssistant({
         setStatus('listening');
         setTranscript('');
         setErrorMessage(null);
+        playChime(880, 0.1);
       };
 
       recognition.onresult = (event: any) => {
@@ -350,7 +609,6 @@ export function useVoiceAssistant({
       };
 
       recognition.onend = () => {
-        // Only reset to idle if not already transitioning to searching, speaking, or error
         setStatus((prev) => (prev === 'listening' ? 'idle' : prev));
       };
 
