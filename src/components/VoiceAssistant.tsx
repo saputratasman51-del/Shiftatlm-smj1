@@ -28,6 +28,7 @@ import {
   useVoiceAssistant,
   TEST_VOICE_PHRASE,
   primeAudio,
+  playMelodicChime,
 } from '../hooks/useVoiceAssistant';
 
 interface VoiceAssistantProps {
@@ -548,9 +549,9 @@ export function VoiceAssistant({
 
       {/* Independent TES SUARA Execution & Status Panel */}
       {testAudioStatus !== 'idle' && (
-        <div className="mt-3.5 p-3 rounded-xl bg-slate-900/95 border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in relative z-10">
-          <div className="flex items-center gap-2.5">
-            <Radio className="w-4 h-4 text-cyan-400 shrink-0 animate-pulse" />
+        <div className="mt-3.5 p-3.5 rounded-xl bg-slate-900/95 border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in relative z-10">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <Radio className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5 sm:mt-0 animate-pulse" />
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[11px] font-bold text-cyan-200">
@@ -562,25 +563,48 @@ export function VoiceAssistant({
                 &ldquo;{TEST_VOICE_PHRASE}&rdquo;
               </p>
               {testAudioMessage && (
-                <p className="text-[10px] text-cyan-300/80 font-mono mt-0.5">
+                <p className="text-[10px] text-cyan-300/90 font-mono mt-0.5">
                   Status: {testAudioMessage}
                 </p>
+              )}
+
+              {/* Actionable fallbacks if failed */}
+              {testAudioStatus === 'failed' && (
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => runAudioTest(true)}
+                    className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-bold rounded-lg transition cursor-pointer flex items-center gap-1 shadow-sm active:scale-95"
+                    title="Coba menggunakan synthesizer bawaan perangkat"
+                  >
+                    <Play className="w-3 h-3 fill-white" />
+                    <span>Uji Suara Bawaan Sistem</span>
+                  </button>
+                  <button
+                    onClick={() => playMelodicChime()}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-semibold rounded-lg border border-cyan-500/30 transition cursor-pointer flex items-center gap-1"
+                    title="Uji apakah speaker perangkat aktif"
+                  >
+                    <Volume2 className="w-3 h-3 text-cyan-400" />
+                    <span>Tes Speaker (Melodi)</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
             {testAudioStatus === 'speaking' ? (
               <button
                 onClick={stopSpeaking}
-                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold rounded-lg transition cursor-pointer"
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg transition cursor-pointer flex items-center gap-1"
               >
-                Hentikan
+                <Square className="w-3 h-3 fill-white" />
+                <span>Hentikan</span>
               </button>
             ) : (
               <button
                 onClick={() => runAudioTest()}
-                className="px-2.5 py-1 bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold rounded-lg transition cursor-pointer"
+                className="px-3 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold rounded-lg transition cursor-pointer active:scale-95"
               >
                 Uji Lagi
               </button>
@@ -690,15 +714,27 @@ export function VoiceAssistant({
                 </div>
               </div>
 
-              {/* Quick action buttons for answer */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  onClick={repeatResponse}
-                  className="p-1.5 rounded-lg bg-teal-900/50 hover:bg-teal-800 text-teal-300 hover:text-white transition cursor-pointer"
-                  title="Dengarkan kembali suara"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
+              {/* Action buttons for answer */}
+              <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                {status === 'speaking' ? (
+                  <button
+                    onClick={stopSpeaking}
+                    className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-sm animate-pulse cursor-pointer"
+                    title="Hentikan pembacaan suara sekarang"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-white" />
+                    <span>HENTIKAN SUARA</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={repeatResponse}
+                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition shadow-md shadow-teal-500/20 active:scale-95 cursor-pointer"
+                    title="Bacakan kembali jadwal shift ini"
+                  >
+                    <Volume2 className="w-3.5 h-3.5 text-slate-950 fill-slate-950" />
+                    <span>BACA JAWABAN</span>
+                  </button>
+                )}
               </div>
             </div>
           )}

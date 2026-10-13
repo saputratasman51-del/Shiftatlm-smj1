@@ -68,8 +68,28 @@ export function isPwaMode(): boolean {
 }
 
 /**
- * Plays a pleasant web audio chime as immediate auditory feedback
- * and seamless fallback when device TTS is unavailable or muted.
+ * Global reference array to prevent Chromium / Safari garbage collection bug
+ * where active utterances are destroyed prematurely before onstart or onend fires.
+ */
+function holdUtteranceRef(utterance: SpeechSynthesisUtterance) {
+  if (typeof window === 'undefined') return;
+  (window as any).__ttsQueue = (window as any).__ttsQueue || [];
+  (window as any).__ttsQueue.push(utterance);
+}
+
+function releaseUtteranceRef(utterance: SpeechSynthesisUtterance) {
+  if (typeof window === 'undefined') return;
+  if (Array.isArray((window as any).__ttsQueue)) {
+    (window as any).__ttsQueue = (window as any).__ttsQueue.filter(
+      (u: any) => u !== utterance
+    );
+  }
+}
+
+/**
+ * Plays an audible acoustic chime via Web Audio API.
+ * Ensures the user receives instant auditory feedback even if TTS is muted,
+ * missing on device, or blocked by the operating system.
  */
 export function playChime(frequency = 784, duration = 0.25) {
   if (typeof window === 'undefined') return;
@@ -85,8 +105,8 @@ export function playChime(frequency = 784, duration = 0.25) {
     const now = ctx.currentTime;
     osc.type = 'sine';
     osc.frequency.setValueAtTime(frequency, now);
-    osc.frequency.exponentialRampToValueAtTime(frequency * 1.2, now + 0.08);
-    gain.gain.setValueAtTime(0.08, now);
+    osc.frequency.exponentialRampToValueAtTime(frequency * 1.25, now + 0.08);
+    gain.gain.setValueAtTime(0.12, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -95,6 +115,15 @@ export function playChime(frequency = 784, duration = 0.25) {
   } catch (e) {
     // ignore
   }
+}
+
+/**
+ * Plays a pleasant three-tone melodic confirmation chime.
+ */
+export function playMelodicChime() {
+  playChime(523.25, 0.15); // C5
+  setTimeout(() => playChime(659.25, 0.18), 90); // E5
+  setTimeout(() => playChime(783.99, 0.25), 180); // G5
 }
 
 /**
@@ -150,9 +179,7 @@ export async function waitForVoices(timeoutMs: number = 600): Promise<SpeechSynt
     if (immediateVoices && immediateVoices.length > 0) {
       return immediateVoices;
     }
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) {}
 
   return new Promise<SpeechSynthesisVoice[]>((resolve) => {
     let isResolved = false;
@@ -164,9 +191,7 @@ export async function waitForVoices(timeoutMs: number = 600): Promise<SpeechSynt
         if (isSpeechSynthesisAvailable()) {
           window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged);
         }
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     };
 
     const handleVoicesChanged = () => {
@@ -183,9 +208,7 @@ export async function waitForVoices(timeoutMs: number = 600): Promise<SpeechSynt
 
     try {
       window.speechSynthesis.addEventListener('voiceschanged', handleVoicesChanged);
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
 
     timer = setTimeout(() => {
       if (isResolved) return;
@@ -267,6 +290,7 @@ export function useVoiceAssistant({
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const keepAliveIntervalRef = useRef<any>(null);
   const testWatchdogRef = useRef<any>(null);
+  const testTickIntervalRef = useRef<any>(null);
   const autoplayWatchdogRef = useRef<any>(null);
 
   // Initialize voice lists, PWA status, and support detection
@@ -299,6 +323,14 @@ export function useVoiceAssistant({
     };
 
     if (hasSynthesis) {
+      // Immediate synchronous grab
+      try {
+        const imm = window.speechSynthesis.getVoices();
+        if (imm && imm.length > 0) {
+          handleVoiceUpdate(imm);
+        }
+      } catch (e) {}
+
       waitForVoices(800).then((voices) => {
         handleVoiceUpdate(voices);
       });
@@ -334,6 +366,10 @@ export function useVoiceAssistant({
           clearTimeout(testWatchdogRef.current);
           testWatchdogRef.current = null;
         }
+        if (testTickIntervalRef.current) {
+          clearInterval(testTickIntervalRef.current);
+          testTickIntervalRef.current = null;
+        }
         if (autoplayWatchdogRef.current) {
           clearTimeout(autoplayWatchdogRef.current);
           autoplayWatchdogRef.current = null;
@@ -343,7 +379,6 @@ export function useVoiceAssistant({
             window.speechSynthesis.cancel();
           }
         } catch (e) {}
-        (window as any).__activeUtterance = null;
       };
     }
 
@@ -360,6 +395,10 @@ export function useVoiceAssistant({
         clearInterval(keepAliveIntervalRef.current);
         keepAliveIntervalRef.current = null;
       }
+      if (testTickIntervalRef.current) {
+        clearInterval(testTickIntervalRef.current);
+        testTickIntervalRef.current = null;
+      }
     };
   }, []);
 
@@ -370,6 +409,10 @@ export function useVoiceAssistant({
     if (keepAliveIntervalRef.current) {
       clearInterval(keepAliveIntervalRef.current);
       keepAliveIntervalRef.current = null;
+    }
+    if (testTickIntervalRef.current) {
+      clearInterval(testTickIntervalRef.current);
+      testTickIntervalRef.current = null;
     }
     if (autoplayWatchdogRef.current) {
       clearTimeout(autoplayWatchdogRef.current);
@@ -387,8 +430,10 @@ export function useVoiceAssistant({
         }
       } catch (e) {}
     }
-    activeUtteranceRef.current = null;
-    (window as any).__activeUtterance = null;
+    if (activeUtteranceRef.current) {
+      releaseUtteranceRef(activeUtteranceRef.current);
+      activeUtteranceRef.current = null;
+    }
     if (status === 'speaking') {
       setStatus('done');
     }
@@ -400,153 +445,274 @@ export function useVoiceAssistant({
 
   /**
    * Independent "TES SUARA" function directly triggered by user click without async delays.
-   * Tests speech synthesis immediately and tracks states:
-   * - 'checking': Memeriksa dukungan suara
-   * - 'speaking': Sedang berbicara
-   * - 'completed': Suara selesai
-   * - 'failed': Gagal memutar suara
+   * Tests speech synthesis immediately with progressive multi-stage fallback:
+   * 1. Try selected Indonesian voice (preferably local)
+   * 2. Try default system voice with lang = 'id-ID' (avoids remote Google TTS network 'synthesis-failed')
+   * 3. Try standard system utterance (lang = '', voice = null)
+   * 4. Acoustic harmonic chime fallback if device lacks TTS engines entirely
+   *
+   * Tracks states as required:
+   * - 'checking': Memeriksa dukungan suara...
+   * - 'speaking': Sedang berbicara...
+   * - 'completed': Suara selesai.
+   * - 'failed': Gagal memutar suara.
    */
-  const runAudioTest = useCallback(async (): Promise<boolean> => {
-    // 1. Synchronously trigger prime audio on user click
-    primeAudio();
+  const runAudioTest = useCallback(
+    (forceDefaultVoice: boolean = false): Promise<boolean> => {
+      // 1. Synchronously trigger prime audio on user click to establish user activation
+      primeAudio();
 
-    // Reset previous watchdog
-    if (testWatchdogRef.current) {
-      clearTimeout(testWatchdogRef.current);
-      testWatchdogRef.current = null;
-    }
-
-    // Set checking state immediately
-    setTestAudioStatus('checking');
-    setTestAudioMessage('Memeriksa dukungan suara...');
-
-    // 2. Validate availability
-    if (!isSpeechSynthesisAvailable()) {
-      setTestAudioStatus('failed');
-      setTestAudioMessage('SpeechSynthesis tidak didukung pada browser atau lingkungan ini.');
-      playChime(440, 0.3);
-      return false;
-    }
-
-    // 3. Stop active recognition to prevent microphone audio session lock
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.abort();
-      } catch (e) {}
-    }
-
-    // 4. Cancel prior speech and resume paused engine
-    try {
-      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
-        window.speechSynthesis.cancel();
+      // Clear any prior test watchdog and interval
+      if (testWatchdogRef.current) {
+        clearTimeout(testWatchdogRef.current);
+        testWatchdogRef.current = null;
       }
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
+      if (testTickIntervalRef.current) {
+        clearInterval(testTickIntervalRef.current);
+        testTickIntervalRef.current = null;
       }
-    } catch (e) {}
+      if (keepAliveIntervalRef.current) {
+        clearInterval(keepAliveIntervalRef.current);
+        keepAliveIntervalRef.current = null;
+      }
 
-    // 5. Look for Indonesian voice
-    let voices = window.speechSynthesis.getVoices();
-    if (!voices || voices.length === 0) {
-      voices = await waitForVoices(300);
-    }
-    const voiceToUse = findIndonesianVoice(voices) || selectedVoice;
+      // Set checking state immediately
+      setTestAudioStatus('checking');
+      setTestAudioMessage('Memeriksa dukungan suara...');
 
-    return new Promise<boolean>((resolve) => {
+      // 2. Validate availability
+      if (!isSpeechSynthesisAvailable()) {
+        setTestAudioStatus('failed');
+        setTestAudioMessage('SpeechSynthesis tidak didukung pada browser atau perangkat ini.');
+        playChime(440, 0.3);
+        return Promise.resolve(false);
+      }
+
+      // 3. Stop active recognition to prevent microphone audio session lock
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {}
+      }
+
+      // 4. Safely handle prior speech: only cancel if actively speaking/pending
       try {
-        const utterance = new SpeechSynthesisUtterance(TEST_VOICE_PHRASE);
-        utterance.lang = 'id-ID';
-        utterance.rate = 1.0;
-        utterance.pitch = 1.0;
-        if (voiceToUse) {
-          utterance.voice = voiceToUse;
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+          window.speechSynthesis.cancel();
         }
-
-        utterance.onstart = () => {
-          if (testWatchdogRef.current) {
-            clearTimeout(testWatchdogRef.current);
-            testWatchdogRef.current = null;
-          }
-          setTestAudioStatus('speaking');
-          setStatus('speaking');
-          setTestAudioMessage('Sedang berbicara...');
-        };
-
-        utterance.onend = () => {
-          if (testWatchdogRef.current) {
-            clearTimeout(testWatchdogRef.current);
-            testWatchdogRef.current = null;
-          }
-          activeUtteranceRef.current = null;
-          (window as any).__activeUtterance = null;
-          setTestAudioStatus('completed');
-          setStatus('done');
-          setTestAudioMessage('Suara selesai.');
-          resolve(true);
-        };
-
-        utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
-          if (testWatchdogRef.current) {
-            clearTimeout(testWatchdogRef.current);
-            testWatchdogRef.current = null;
-          }
-          activeUtteranceRef.current = null;
-          (window as any).__activeUtterance = null;
-
-          if (e.error === 'canceled' || e.error === 'interrupted') {
-            setTestAudioStatus('idle');
-            setTestAudioMessage(null);
-            resolve(true);
-            return;
-          }
-
-          console.warn('Test audio error:', e.error);
-          setTestAudioStatus('failed');
-          setTestAudioMessage(`Gagal memutar suara (${e.error || 'error'}).`);
-          playChime(523, 0.25);
-          resolve(false);
-        };
-
-        activeUtteranceRef.current = utterance;
-        (window as any).__activeUtterance = utterance;
-
-        // Speak utterance
-        window.speechSynthesis.speak(utterance);
-
-        // Resume engine if paused
         if (window.speechSynthesis.paused) {
           window.speechSynthesis.resume();
         }
+      } catch (e) {}
 
-        // Safety watchdog: If onstart doesn't fire within 2.5s, check engine state
-        testWatchdogRef.current = setTimeout(() => {
+      // Grab existing voices synchronously without waiting for promises (preserves user gesture)
+      let currentVoices: SpeechSynthesisVoice[] = [];
+      try {
+        currentVoices = window.speechSynthesis.getVoices() || [];
+      } catch (e) {}
+      if (currentVoices.length === 0 && availableVoices.length > 0) {
+        currentVoices = availableVoices;
+      }
+
+      const verifiedIndonesianVoice = forceDefaultVoice
+        ? null
+        : findIndonesianVoice(currentVoices) || selectedVoice;
+
+      return new Promise<boolean>((resolve) => {
+        let currentAttempt = forceDefaultVoice ? 2 : 1;
+        const maxAttempts = 3;
+        let speechHasStarted = false;
+
+        const executeAttempt = (attempt: number) => {
           try {
+            if (typeof window.SpeechSynthesisUtterance === 'undefined') {
+              throw new Error('SpeechSynthesisUtterance unavailable');
+            }
+
+            const utterance = new SpeechSynthesisUtterance(TEST_VOICE_PHRASE);
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+
+            if (attempt === 1) {
+              // Attempt 1: id-ID with identified voice (if any)
+              utterance.lang = 'id-ID';
+              if (verifiedIndonesianVoice) {
+                utterance.voice = verifiedIndonesianVoice;
+              }
+            } else if (attempt === 2) {
+              // Attempt 2: id-ID without setting voice object.
+              // Critical fix: allows native OS synthesizer to speak without failing on remote Google TTS network errors!
+              utterance.lang = 'id-ID';
+              utterance.voice = null;
+            } else {
+              // Attempt 3: Standard system fallback
+              utterance.lang = '';
+              utterance.voice = null;
+            }
+
+            utterance.onstart = () => {
+              speechHasStarted = true;
+              if (testWatchdogRef.current) {
+                clearTimeout(testWatchdogRef.current);
+                testWatchdogRef.current = null;
+              }
+              setTestAudioStatus('speaking');
+              setStatus('speaking');
+              setTestAudioMessage('Sedang berbicara...');
+
+              // Periodic engine keepalive (prevents Chrome Android 15s freeze bug)
+              if (keepAliveIntervalRef.current) clearInterval(keepAliveIntervalRef.current);
+              keepAliveIntervalRef.current = setInterval(() => {
+                try {
+                  if (window.speechSynthesis.speaking && window.speechSynthesis.paused) {
+                    window.speechSynthesis.resume();
+                  }
+                } catch (e) {}
+              }, 2000);
+            };
+
+            utterance.onend = () => {
+              if (testWatchdogRef.current) {
+                clearTimeout(testWatchdogRef.current);
+                testWatchdogRef.current = null;
+              }
+              if (testTickIntervalRef.current) {
+                clearInterval(testTickIntervalRef.current);
+                testTickIntervalRef.current = null;
+              }
+              if (keepAliveIntervalRef.current) {
+                clearInterval(keepAliveIntervalRef.current);
+                keepAliveIntervalRef.current = null;
+              }
+              releaseUtteranceRef(utterance);
+              activeUtteranceRef.current = null;
+
+              setTestAudioStatus('completed');
+              setStatus('done');
+              setTestAudioMessage('Suara selesai.');
+              resolve(true);
+            };
+
+            utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
+              if (e.error === 'canceled' || e.error === 'interrupted') {
+                releaseUtteranceRef(utterance);
+                if (testWatchdogRef.current) {
+                  clearTimeout(testWatchdogRef.current);
+                  testWatchdogRef.current = null;
+                }
+                setTestAudioStatus('idle');
+                setTestAudioMessage(null);
+                resolve(true);
+                return;
+              }
+
+              console.warn(`Test audio error on attempt ${attempt}:`, e.error);
+              releaseUtteranceRef(utterance);
+
+              // Auto-fallback: If attempt 1 or 2 failed with synthesis-failed, language-unavailable, or voice-unavailable
+              if (
+                attempt < maxAttempts &&
+                (e.error === 'synthesis-failed' ||
+                  e.error === 'voice-unavailable' ||
+                  e.error === 'language-unavailable' ||
+                  e.error === 'not-allowed' ||
+                  e.error === 'audio-busy')
+              ) {
+                setTimeout(() => {
+                  try {
+                    if (window.speechSynthesis.paused) {
+                      window.speechSynthesis.resume();
+                    }
+                  } catch (err) {}
+                  executeAttempt(attempt + 1);
+                }, 30);
+                return;
+              }
+
+              // All attempts exhausted
+              if (testWatchdogRef.current) {
+                clearTimeout(testWatchdogRef.current);
+                testWatchdogRef.current = null;
+              }
+              if (testTickIntervalRef.current) {
+                clearInterval(testTickIntervalRef.current);
+                testTickIntervalRef.current = null;
+              }
+              activeUtteranceRef.current = null;
+
+              setTestAudioStatus('failed');
+              setTestAudioMessage(
+                e.error === 'synthesis-failed'
+                  ? 'Gagal memutar suara (mesin TTS perangkat tidak merespons).'
+                  : `Gagal memutar suara (${e.error || 'error'}).`
+              );
+              playChime(523, 0.25);
+              resolve(false);
+            };
+
+            activeUtteranceRef.current = utterance;
+            holdUtteranceRef(utterance);
+
+            // Execute speech
+            window.speechSynthesis.speak(utterance);
+
             if (window.speechSynthesis.paused) {
               window.speechSynthesis.resume();
             }
-          } catch (e) {}
 
-          // If still checking after 3s, flag error
-          setTimeout(() => {
-            setTestAudioStatus((prev) => {
-              if (prev === 'checking') {
-                playChime(523, 0.25);
-                setTestAudioMessage('Gagal memutar suara (audio engine timeout).');
-                return 'failed';
+            // Periodic tick to wake up background synthesizer queue
+            if (testTickIntervalRef.current) clearInterval(testTickIntervalRef.current);
+            testTickIntervalRef.current = setInterval(() => {
+              try {
+                if (window.speechSynthesis.paused) {
+                  window.speechSynthesis.resume();
+                }
+              } catch (e) {}
+            }, 800);
+
+            // Resilient Watchdog: 7 seconds timeout (allows mobile TTS engines time to load voice models)
+            if (testWatchdogRef.current) clearTimeout(testWatchdogRef.current);
+            testWatchdogRef.current = setTimeout(() => {
+              if (testTickIntervalRef.current) {
+                clearInterval(testTickIntervalRef.current);
+                testTickIntervalRef.current = null;
               }
-              return prev;
-            });
-          }, 800);
-        }, 1500);
-      } catch (err: any) {
-        console.error('Run audio test error:', err);
-        setTestAudioStatus('failed');
-        setTestAudioMessage('Gagal memutar suara.');
-        playChime(523, 0.25);
-        resolve(false);
-      }
-    });
-  }, [selectedVoice]);
+
+              if (!speechHasStarted) {
+                // If attempt 1 hung, try attempt 2 before giving up
+                if (attempt < maxAttempts) {
+                  try {
+                    window.speechSynthesis.cancel();
+                  } catch (e) {}
+                  executeAttempt(attempt + 1);
+                  return;
+                }
+
+                setTestAudioStatus('failed');
+                setTestAudioMessage('Gagal memutar suara (mesin suara perangkat membutuhkan waktu terlalu lama).');
+                playChime(523, 0.25);
+                resolve(false);
+              }
+            }, 7000);
+          } catch (initErr: any) {
+            console.error('Test audio invocation error:', initErr);
+            if (attempt < maxAttempts) {
+              executeAttempt(attempt + 1);
+            } else {
+              setTestAudioStatus('failed');
+              setTestAudioMessage('Gagal memutar suara.');
+              playChime(523, 0.25);
+              resolve(false);
+            }
+          }
+        };
+
+        // Start execution
+        executeAttempt(currentAttempt);
+      });
+    },
+    [availableVoices, selectedVoice]
+  );
 
   /**
    * Spoken response function connected to the assistant schedule query results.
@@ -561,8 +727,8 @@ export function useVoiceAssistant({
 
       // 2. Pre-flight check: Availability
       if (!isSpeechSynthesisAvailable()) {
-        console.warn('SpeechSynthesis is not available in this environment. Falling back to chime.');
-        playChime(660, 0.2);
+        console.warn('SpeechSynthesis is not available in this environment. Falling back to acoustic melody.');
+        playMelodicChime();
         return false;
       }
 
@@ -601,18 +767,23 @@ export function useVoiceAssistant({
       // Play soft chime for immediate sensory confirmation
       playChime(659, 0.15);
 
-      // 6. Ensure voices are loaded before choosing Indonesian 'id-ID' voice
+      // 6. Synchronously inspect voices (or quick wait if unpopulated)
       let voices = window.speechSynthesis.getVoices();
       if (!voices || voices.length === 0) {
-        voices = await waitForVoices(500);
+        if (availableVoices.length > 0) {
+          voices = availableVoices;
+        } else {
+          voices = await waitForVoices(400);
+        }
       }
 
       const verifiedIndonesianVoice = findIndonesianVoice(voices) || selectedVoice;
 
-      // 7. Trigger playback with robust multi-attempt execution and autoplay watchdog
+      // 7. Trigger playback with robust multi-tier execution and autoplay watchdog
       return new Promise<boolean>((resolve) => {
         let attempt = 0;
         const maxAttempts = 3;
+        let startedSpeaking = false;
 
         const executeSpeech = () => {
           attempt++;
@@ -632,14 +803,17 @@ export function useVoiceAssistant({
                 utterance.voice = verifiedIndonesianVoice;
               }
             } else if (attempt === 2) {
+              // Fallback without binding voice object: relies on OS local Indonesian TTS
               utterance.lang = 'id-ID';
               utterance.voice = null;
             } else {
+              // Final system fallback
               utterance.lang = '';
               utterance.voice = null;
             }
 
             utterance.onstart = () => {
+              startedSpeaking = true;
               if (autoplayWatchdogRef.current) {
                 clearTimeout(autoplayWatchdogRef.current);
                 autoplayWatchdogRef.current = null;
@@ -656,7 +830,7 @@ export function useVoiceAssistant({
                     window.speechSynthesis.resume();
                   }
                 } catch (e) {}
-              }, 3000);
+              }, 2500);
             };
 
             utterance.onend = () => {
@@ -668,8 +842,8 @@ export function useVoiceAssistant({
                 clearInterval(keepAliveIntervalRef.current);
                 keepAliveIntervalRef.current = null;
               }
+              releaseUtteranceRef(utterance);
               activeUtteranceRef.current = null;
-              (window as any).__activeUtterance = null;
               setAutoplayBlocked(false);
               setStatus('done');
               resolve(true);
@@ -684,8 +858,8 @@ export function useVoiceAssistant({
                 clearInterval(keepAliveIntervalRef.current);
                 keepAliveIntervalRef.current = null;
               }
+              releaseUtteranceRef(utterance);
               activeUtteranceRef.current = null;
-              (window as any).__activeUtterance = null;
 
               if (event.error === 'canceled' || event.error === 'interrupted') {
                 setStatus('done');
@@ -700,21 +874,22 @@ export function useVoiceAssistant({
                 attempt < maxAttempts &&
                 (event.error === 'synthesis-failed' ||
                   event.error === 'voice-unavailable' ||
-                  event.error === 'language-unavailable')
+                  event.error === 'language-unavailable' ||
+                  event.error === 'not-allowed')
               ) {
-                setTimeout(executeSpeech, 50);
+                setTimeout(executeSpeech, 40);
                 return;
               }
 
-              // Exhausted speech attempts
-              playChime(523, 0.25);
-              setErrorMessage(null);
+              // All speech attempts exhausted: play pleasant harmonic melody
+              playMelodicChime();
+              setAutoplayBlocked(true); // Offer 1-tap "BACA JAWABAN" button
               setStatus('done');
               resolve(false);
             };
 
             activeUtteranceRef.current = utterance;
-            (window as any).__activeUtterance = utterance;
+            holdUtteranceRef(utterance);
 
             window.speechSynthesis.speak(utterance);
 
@@ -734,31 +909,31 @@ export function useVoiceAssistant({
 
                 // Check after another brief tick if it actually started
                 setTimeout(() => {
-                  if (status !== 'speaking' && !window.speechSynthesis.speaking) {
+                  if (!startedSpeaking && !window.speechSynthesis.speaking) {
                     // Autoplay was suppressed by mobile/PWA policy
                     setAutoplayBlocked(true);
                     setStatus('done');
                   }
-                }, 300);
-              }, 900);
+                }, 400);
+              }, 1200);
             }
           } catch (initErr: any) {
             console.warn('Speech synthesis initialization exception on attempt', attempt, initErr);
             if (attempt < maxAttempts) {
-              setTimeout(executeSpeech, 50);
+              setTimeout(executeSpeech, 40);
             } else {
-              playChime(523, 0.25);
-              setErrorMessage(null);
+              playMelodicChime();
+              setAutoplayBlocked(true);
               setStatus('done');
               resolve(false);
             }
           }
         };
 
-        setTimeout(executeSpeech, 40);
+        setTimeout(executeSpeech, 30);
       });
     },
-    [speechEnabled, selectedVoice, status]
+    [speechEnabled, selectedVoice, availableVoices]
   );
 
   /**
