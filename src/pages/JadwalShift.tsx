@@ -517,6 +517,8 @@ export default function JadwalShift() {
       <VoiceAssistant
         activeProfileId={activeProfile.id}
         activeProfileName={activeProfile.full_name}
+        isAdmin={isAdmin}
+        profiles={profiles}
         assignments={assignments}
         shifts={shifts}
         onNavigateDate={(dateStr) => {

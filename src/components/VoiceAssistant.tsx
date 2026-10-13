@@ -29,9 +29,14 @@ import {
   ChevronDown,
   ChevronUp,
   Settings,
+  Crown,
+  Shield,
+  UserCheck,
+  Users,
 } from 'lucide-react';
-import { ShiftAssignment, Shift } from '../types';
+import { ShiftAssignment, Shift, UserProfile } from '../types';
 import { dataService, getPontianakDateString } from '../services/dataService';
+import { useAuth } from '../context/AuthContext';
 import {
   useVoiceAssistant,
   TEST_VOICE_PHRASE,
@@ -44,6 +49,8 @@ import {
 interface VoiceAssistantProps {
   activeProfileId: string;
   activeProfileName: string;
+  isAdmin?: boolean;
+  profiles?: UserProfile[];
   assignments: ShiftAssignment[];
   shifts: Shift[];
   onNavigateDate: (dateStr: string) => void;
@@ -65,6 +72,7 @@ const INDONESIAN_MONTHS: Record<string, { num: string; name: string }> = {
   september: { num: '09', name: 'September' },
   oktober: { num: '10', name: 'Oktober' },
   november: { num: '11', name: 'November' },
+  nopember: { num: '11', name: 'November' },
   desember: { num: '12', name: 'Desember' },
   jan: { num: '01', name: 'Januari' },
   feb: { num: '02', name: 'Februari' },
@@ -80,9 +88,240 @@ const INDONESIAN_MONTHS: Record<string, { num: string; name: string }> = {
   des: { num: '12', name: 'Desember' },
 };
 
+const INDONESIAN_NUMBER_WORDS: Record<string, number> = {
+  'tiga puluh satu': 31,
+  'tiga puluh': 30,
+  'dua puluh sembilan': 29,
+  'dua puluh delapan': 28,
+  'dua puluh tujuh': 27,
+  'dua puluh enam': 26,
+  'dua puluh lima': 25,
+  'dua puluh empat': 24,
+  'dua puluh tiga': 23,
+  'dua puluh dua': 22,
+  'dua puluh satu': 21,
+  'dua puluh': 20,
+  'sembilan belas': 19,
+  'delapan belas': 18,
+  'tujuh belas': 17,
+  'enam belas': 16,
+  'lima belas': 15,
+  'empat belas': 14,
+  'tiga belas': 13,
+  'dua belas': 12,
+  'sebelas': 11,
+  'sepuluh': 10,
+  'sembilan': 9,
+  'delapan': 8,
+  'tujuh': 7,
+  'enam': 6,
+  'lima': 5,
+  'empat': 4,
+  'tiga': 3,
+  'dua': 2,
+  'satu': 1,
+};
+
+/**
+ * Normalizes staff name by removing professional credentials / academic degrees.
+ */
+export function cleanTitleFromStaffName(fullName: string): string {
+  if (!fullName) return '';
+  return fullName
+    .replace(/,\s*(s\.tr\.kes|a\.md\.ak|a\.md\.kes|s\.si|s\.kep|m\.kes|s\.ked|skm|dr|apt|ns|sp\.[a-z]+)\b/gi, '')
+    .replace(/\b(dr\.|drg\.|ns\.|apt\.|prof\.|h\.|hj\.)\s*/gi, '')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Robust Indonesian staff matcher from spoken transcript.
+ */
+export function matchStaffFromSpokenText(
+  spokenText: string,
+  allStaffProfiles: UserProfile[],
+  currentUserId: string
+): {
+  matchedProfile: UserProfile | null;
+  isSelfExplicit: boolean;
+  score: number;
+} {
+  const text = spokenText.toLowerCase().trim();
+
+  // 1. Explicit self keywords
+  const isSelfWord =
+    text.includes('saya') ||
+    text.includes('jadwal saya') ||
+    text.includes('shift saya') ||
+    text.includes('dinas saya') ||
+    text.includes('jadwalku') ||
+    text.includes('shiftku') ||
+    text.includes('akun saya') ||
+    text.includes('diri saya');
+
+  if (isSelfWord) {
+    const selfProfile = allStaffProfiles.find((p) => p.id === currentUserId) || null;
+    return { matchedProfile: selfProfile, isSelfExplicit: true, score: 100 };
+  }
+
+  // 2. Score each registered staff profile against spoken text
+  let bestProfile: UserProfile | null = null;
+  let highestScore = 0;
+
+  for (const profile of allStaffProfiles) {
+    const cleanFull = cleanTitleFromStaffName(profile.full_name).toLowerCase();
+    const nameParts = cleanFull.split(' ').filter((p) => p.length >= 3);
+
+    let score = 0;
+
+    // Full name match (e.g. "siti rahmawati", "budi santoso", "ahmad fauzi")
+    if (text.includes(cleanFull)) {
+      score = 100 + cleanFull.length;
+    } else {
+      let matchedPartsCount = 0;
+      for (const part of nameParts) {
+        const regex = new RegExp(`\\b${part}\\b`, 'i');
+        if (regex.test(text)) {
+          matchedPartsCount++;
+        }
+      }
+
+      if (matchedPartsCount === nameParts.length && nameParts.length > 0) {
+        score = 85;
+      } else if (matchedPartsCount > 0) {
+        score = 50 + (matchedPartsCount * 10);
+      }
+    }
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestProfile = profile;
+    }
+  }
+
+  if (highestScore >= 50 && bestProfile) {
+    return {
+      matchedProfile: bestProfile,
+      isSelfExplicit: bestProfile.id === currentUserId,
+      score: highestScore,
+    };
+  }
+
+  return { matchedProfile: null, isSelfExplicit: false, score: 0 };
+}
+
+/**
+ * Extracts date, month, and year from natural Indonesian speech.
+ */
+export function extractDateAndMonth(text: string, todayDateStr: string): {
+  targetDateStr: string;
+  matchedDay: string | null;
+  matchedMonthName: string | null;
+  matchedYear: string | null;
+} {
+  const [currYearStr, currMonthStr, currDayStr] = todayDateStr.split('-');
+  const todayObj = new Date(parseInt(currYearStr), parseInt(currMonthStr) - 1, parseInt(currDayStr));
+
+  // Check relative dates
+  if (text.includes('hari ini') || text.includes('sekarang')) {
+    return {
+      targetDateStr: todayDateStr,
+      matchedDay: currDayStr,
+      matchedMonthName: null,
+      matchedYear: currYearStr,
+    };
+  }
+  if (text.includes('besok')) {
+    const tomorrow = new Date(todayObj);
+    tomorrow.setDate(todayObj.getDate() + 1);
+    const dateStr = getPontianakDateString(tomorrow);
+    return { targetDateStr: dateStr, matchedDay: dateStr.slice(8, 10), matchedMonthName: null, matchedYear: dateStr.slice(0, 4) };
+  }
+  if (text.includes('lusa')) {
+    const lusa = new Date(todayObj);
+    lusa.setDate(todayObj.getDate() + 2);
+    const dateStr = getPontianakDateString(lusa);
+    return { targetDateStr: dateStr, matchedDay: dateStr.slice(8, 10), matchedMonthName: null, matchedYear: dateStr.slice(0, 4) };
+  }
+  if (text.includes('kemarin')) {
+    const yesterday = new Date(todayObj);
+    yesterday.setDate(todayObj.getDate() - 1);
+    const dateStr = getPontianakDateString(yesterday);
+    return { targetDateStr: dateStr, matchedDay: dateStr.slice(8, 10), matchedMonthName: null, matchedYear: dateStr.slice(0, 4) };
+  }
+
+  // Pre-process text to convert Indonesian number words if present
+  let processedText = text;
+  for (const [word, num] of Object.entries(INDONESIAN_NUMBER_WORDS)) {
+    const reg = new RegExp(`\\b${word}\\b`, 'gi');
+    if (reg.test(processedText)) {
+      processedText = processedText.replace(reg, num.toString());
+      break;
+    }
+  }
+
+  // Extract day number
+  let extractedDay: string | null = null;
+  const dayWithPrefixRegex = /(?:tanggal|tgl\.?)\s*(\b[0-9]{1,2}\b)/i;
+  const dayWithPrefixMatch = processedText.match(dayWithPrefixRegex);
+  if (dayWithPrefixMatch) {
+    const d = parseInt(dayWithPrefixMatch[1], 10);
+    if (d >= 1 && d <= 31) extractedDay = String(d).padStart(2, '0');
+  }
+
+  if (!extractedDay) {
+    // Look for standalone 1-31 number
+    const standaloneDayRegex = /\b([1-9]|[12][0-9]|3[01])\b/;
+    const standaloneMatch = processedText.match(standaloneDayRegex);
+    if (standaloneMatch) {
+      extractedDay = String(parseInt(standaloneMatch[1], 10)).padStart(2, '0');
+    }
+  }
+
+  // Extract month
+  let extractedMonthNum: string | null = null;
+  let extractedMonthName: string | null = null;
+  for (const [key, meta] of Object.entries(INDONESIAN_MONTHS)) {
+    const reg = new RegExp(`\\b${key}\\b`, 'i');
+    if (reg.test(processedText)) {
+      extractedMonthNum = meta.num;
+      extractedMonthName = meta.name;
+      break;
+    }
+  }
+
+  // Extract year
+  let extractedYear: string | null = null;
+  const yearMatch = processedText.match(/\b(202[4-9])\b/);
+  if (yearMatch) {
+    extractedYear = yearMatch[1];
+  }
+
+  if (extractedDay) {
+    const finalYear = extractedYear || currYearStr;
+    const finalMonth = extractedMonthNum || currMonthStr;
+    return {
+      targetDateStr: `${finalYear}-${finalMonth}-${extractedDay}`,
+      matchedDay: extractedDay,
+      matchedMonthName: extractedMonthName,
+      matchedYear: finalYear,
+    };
+  }
+
+  return {
+    targetDateStr: todayDateStr,
+    matchedDay: null,
+    matchedMonthName: extractedMonthName,
+    matchedYear: extractedYear || currYearStr,
+  };
+}
+
 export function VoiceAssistant({
   activeProfileId,
   activeProfileName,
+  isAdmin,
+  profiles = [],
   assignments,
   shifts,
   onNavigateDate,
@@ -90,9 +329,15 @@ export function VoiceAssistant({
   onFilterStaff,
   onSelectAssignment,
 }: VoiceAssistantProps) {
+  const auth = useAuth();
+  const effectiveIsAdmin = isAdmin !== undefined ? isAdmin : auth?.isAdmin ?? false;
+  const effectiveProfiles = profiles.length > 0 ? profiles : auth?.allProfiles ?? [];
+
   const [textInputFallback, setTextInputFallback] = useState('');
   const [showTextFallback, setShowTextFallback] = useState(false);
   const [matchedAssignmentResult, setMatchedAssignmentResult] = useState<ShiftAssignment | null>(null);
+  const [matchedTargetProfile, setMatchedTargetProfile] = useState<UserProfile | null>(null);
+  const [isStaffSearchMatched, setIsStaffSearchMatched] = useState<boolean>(false);
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
   const [showAndroidTtsGuideModal, setShowAndroidTtsGuideModal] = useState(false);
   const [showInlineMobileDiag, setShowInlineMobileDiag] = useState(false);
@@ -142,9 +387,9 @@ export function VoiceAssistant({
 
   /**
    * Main command processing logic:
-   * 1. Parses Indonesian natural language dates & intents
-   * 2. Queries live database for assignments on that date
-   * 3. Syncs calendar view
+   * 1. Supports Admin voice searching ANY registered staff schedule by name + date + month
+   * 2. Protects staff privacy (non-admin can only access own schedule)
+   * 3. Syncs calendar view and active staff filter
    * 4. Synthesizes and speaks Indonesian verbal reply
    */
   const handleProcessCommand = async (rawText: string) => {
@@ -153,6 +398,8 @@ export function VoiceAssistant({
     setStatus('searching');
     setErrorMessage(null);
     setMatchedAssignmentResult(null);
+    setMatchedTargetProfile(null);
+    setIsStaffSearchMatched(false);
     setAutoplayBlocked(false);
 
     const text = rawText.toLowerCase().trim();
@@ -183,74 +430,74 @@ export function VoiceAssistant({
         }
       }
 
-      // 2. Date determination
-      const todayDateStr = getPontianakDateString();
-      const [currYearStr, currMonthStr, currDayStr] = todayDateStr.split('-');
-      const todayObj = new Date(parseInt(currYearStr), parseInt(currMonthStr) - 1, parseInt(currDayStr));
-
-      let targetDateStr = '';
-
-      if (text.includes('hari ini') || text.includes('sekarang')) {
-        targetDateStr = todayDateStr;
-      } else if (text.includes('besok')) {
-        const tomorrow = new Date(todayObj);
-        tomorrow.setDate(todayObj.getDate() + 1);
-        targetDateStr = getPontianakDateString(tomorrow);
-      } else if (text.includes('lusa')) {
-        const lusa = new Date(todayObj);
-        lusa.setDate(todayObj.getDate() + 2);
-        targetDateStr = getPontianakDateString(lusa);
-      } else if (text.includes('kemarin')) {
-        const yesterday = new Date(todayObj);
-        yesterday.setDate(todayObj.getDate() - 1);
-        targetDateStr = getPontianakDateString(yesterday);
-      } else {
-        // Parse day, month, and year from speech
-        let extractedDay: string | null = null;
-        let extractedMonthNum: string | null = null;
-        let extractedYear: string | null = null;
-
-        // Try to match "tanggal XX" or standalone day numbers
-        const dayRegex = /(?:tanggal|tgl)?\s*(\b[0-9]{1,2}\b)/;
-        const dayMatch = text.match(dayRegex);
-        if (dayMatch) {
-          const dayNum = parseInt(dayMatch[1], 10);
-          if (dayNum >= 1 && dayNum <= 31) {
-            extractedDay = String(dayNum).padStart(2, '0');
-          }
-        }
-
-        // Try to match Indonesian month name
-        for (const [key, meta] of Object.entries(INDONESIAN_MONTHS)) {
-          if (text.includes(key)) {
-            extractedMonthNum = meta.num;
-            break;
-          }
-        }
-
-        // Try to match 4-digit year (e.g., 2025, 2026, 2027)
-        const yearMatch = text.match(/\b(202[4-9])\b/);
-        if (yearMatch) {
-          extractedYear = yearMatch[1];
-        }
-
-        if (extractedDay) {
-          const finalYear = extractedYear || currYearStr;
-          const finalMonth = extractedMonthNum || currMonthStr;
-          targetDateStr = `${finalYear}-${finalMonth}-${extractedDay}`;
-        } else {
-          // If no specific date found, default to today
-          targetDateStr = todayDateStr;
+      // 2. Identify target staff from spoken transcript
+      let registeredProfiles = effectiveProfiles;
+      if (!registeredProfiles || registeredProfiles.length === 0) {
+        try {
+          registeredProfiles = await dataService.getProfiles();
+        } catch (e) {
+          registeredProfiles = [];
         }
       }
 
-      // 3. Search database for the schedule on targetDateStr
+      const staffMatch = matchStaffFromSpokenText(text, registeredProfiles, activeProfileId);
+      let targetProfile = staffMatch.matchedProfile;
+      let isOtherStaffSearch = false;
+
+      // Handle staff matching and role-based access control
+      if (targetProfile && targetProfile.id !== activeProfileId) {
+        if (!effectiveIsAdmin) {
+          // Petugas selain admin HANYA bisa akses akunnya sendiri
+          const callerCleanName = cleanTitleFromStaffName(activeProfileName);
+          const deniedReply = `Mohon maaf, Anda masuk sebagai petugas ${callerCleanName}. Akses pencarian jadwal petugas lain hanya dapat dilakukan oleh Administrator. Sistem menampilkan jadwal dinas Anda sendiri.`;
+          targetProfile = registeredProfiles.find((p) => p.id === activeProfileId) || null;
+          isOtherStaffSearch = false;
+          setResponseMessage(deniedReply);
+        } else {
+          // ADMIN DISETUJUI: Melakukan pencarian jadwal petugas terdaftar
+          isOtherStaffSearch = true;
+        }
+      } else if (!targetProfile) {
+        // If query mentions keyword petugas/staf but not matched to any registered profile
+        const mentionsStaffKeywords = text.includes('petugas') || text.includes('staf') || text.includes('pegawai');
+        if (mentionsStaffKeywords && effectiveIsAdmin) {
+          const notFoundStaffReply = `Petugas dengan nama tersebut tidak ditemukan di daftar petugas terdaftar aplikasi. Silakan sebutkan nama petugas yang terdaftar seperti Siti Rahmawati, Budi Santoso, Nurul Hidayah, atau Ahmad Fauzi, disertai tanggal dan bulan shift.`;
+          setResponseMessage(notFoundStaffReply);
+          await speakResponse(notFoundStaffReply);
+          return;
+        }
+
+        // Default to active profile
+        targetProfile = registeredProfiles.find((p) => p.id === activeProfileId) || null;
+      }
+
+      // Ensure fallback targetProfile
+      if (!targetProfile) {
+        targetProfile = {
+          id: activeProfileId,
+          full_name: activeProfileName,
+          nip_str: '',
+          role: 'staff',
+          position: 'Petugas ATLM',
+          phone: '',
+          is_active: true,
+        };
+      }
+
+      setMatchedTargetProfile(targetProfile);
+      setIsStaffSearchMatched(isOtherStaffSearch);
+
+      // 3. Date, Month, and Year determination
+      const todayDateStr = getPontianakDateString();
+      const { targetDateStr } = extractDateAndMonth(text, todayDateStr);
+
+      // 4. Search database for the schedule on targetDateStr
       let foundAssignment: ShiftAssignment | null = null;
 
       try {
         const freshAssignments = await dataService.getAssignments({
           date: targetDateStr,
-          profileId: activeProfileId,
+          profileId: targetProfile.id,
         });
 
         if (freshAssignments && freshAssignments.length > 0) {
@@ -264,22 +511,25 @@ export function VoiceAssistant({
       if (!foundAssignment) {
         foundAssignment =
           assignments.find(
-            (a) => a.profile_id === activeProfileId && a.shift_date === targetDateStr
+            (a) => a.profile_id === targetProfile?.id && a.shift_date === targetDateStr
           ) || null;
       }
 
-      // 4. Navigate calendar to date and apply filter
+      // 5. Navigate calendar to date and apply staff filter
       onNavigateDate(targetDateStr);
-      onFilterStaff(activeProfileId);
+      onSelectMonth(targetDateStr.slice(0, 7));
+      onFilterStaff(targetProfile.id);
 
       if (foundAssignment) {
         setMatchedAssignmentResult(foundAssignment);
         if (onSelectAssignment) {
           onSelectAssignment(foundAssignment);
         }
+      } else {
+        setMatchedAssignmentResult(null);
       }
 
-      // 5. Build human-friendly Indonesian spoken response
+      // 6. Build human-friendly Indonesian spoken response
       const [y, m, d] = targetDateStr.split('-');
       const targetDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
       const formattedDate = targetDateObj.toLocaleDateString('id-ID', {
@@ -289,27 +539,48 @@ export function VoiceAssistant({
         year: 'numeric',
       });
 
+      const spokenStaffName = cleanTitleFromStaffName(targetProfile.full_name);
       let reply = '';
-      if (foundAssignment) {
-        const resolvedShift =
-          foundAssignment.shift || shifts.find((s) => s.id === foundAssignment?.shift_id);
-        const shiftName = resolvedShift?.name || 'Shift Jaga';
-        const startTime = resolvedShift?.start_time ? resolvedShift.start_time.slice(0, 5) : '';
-        const endTime = resolvedShift?.end_time ? resolvedShift.end_time.slice(0, 5) : '';
 
-        const timeDetail =
-          startTime && endTime ? `pukul ${startTime} sampai ${endTime} W I B` : '';
+      if (isOtherStaffSearch) {
+        // Voice response for Admin searching registered staff
+        if (foundAssignment) {
+          const resolvedShift =
+            foundAssignment.shift || shifts.find((s) => s.id === foundAssignment?.shift_id);
+          const shiftName = resolvedShift?.name || 'Shift Jaga';
+          const startTime = resolvedShift?.start_time ? resolvedShift.start_time.slice(0, 5) : '';
+          const endTime = resolvedShift?.end_time ? resolvedShift.end_time.slice(0, 5) : '';
+          const timeDetail =
+            startTime && endTime ? `pukul ${startTime} sampai ${endTime} W I B` : '';
 
-        reply = `Jadwal shift Anda pada hari ${formattedDate} adalah ${shiftName}${
-          timeDetail ? ` ${timeDetail}` : ''
-        }. Kalender sudah saya arahkan ke tanggal tersebut.`;
+          reply = `Jadwal shift ${spokenStaffName} pada hari ${formattedDate} adalah ${shiftName}${
+            timeDetail ? ` ${timeDetail}` : ''
+          }. Kalender dan filter petugas telah diarahkan ke ${spokenStaffName}.`;
+        } else {
+          reply = `Jadwal shift ${spokenStaffName} pada hari ${formattedDate} tidak ditemukan dalam sistem. Kemungkinan yang bersangkutan libur dinas jaga pada hari tersebut. Kalender telah diarahkan ke tanggal tersebut.`;
+        }
       } else {
-        reply = `Maaf ${activeProfileName}, jadwal shift Anda pada hari ${formattedDate} tidak ditemukan. Kemungkinan Anda libur dinas jaga pada hari tersebut.`;
+        // Voice response for searching own schedule
+        if (foundAssignment) {
+          const resolvedShift =
+            foundAssignment.shift || shifts.find((s) => s.id === foundAssignment?.shift_id);
+          const shiftName = resolvedShift?.name || 'Shift Jaga';
+          const startTime = resolvedShift?.start_time ? resolvedShift.start_time.slice(0, 5) : '';
+          const endTime = resolvedShift?.end_time ? resolvedShift.end_time.slice(0, 5) : '';
+          const timeDetail =
+            startTime && endTime ? `pukul ${startTime} sampai ${endTime} W I B` : '';
+
+          reply = `Jadwal shift Anda pada hari ${formattedDate} adalah ${shiftName}${
+            timeDetail ? ` ${timeDetail}` : ''
+          }. Kalender sudah saya arahkan ke tanggal tersebut.`;
+        } else {
+          reply = `Maaf ${cleanTitleFromStaffName(activeProfileName)}, jadwal shift Anda pada hari ${formattedDate} tidak ditemukan. Kemungkinan Anda libur dinas jaga pada hari tersebut.`;
+        }
       }
 
       setResponseMessage(reply);
 
-      // 6. Speak the response aloud via Web Speech API
+      // 7. Speak the response aloud via Web Speech API
       await speakResponse(reply);
     } catch (err: any) {
       console.error('Error handling voice command:', err);
@@ -491,6 +762,18 @@ export function VoiceAssistant({
                 Asisten Suara Pintar (id-ID)
               </span>
 
+              {effectiveIsAdmin ? (
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-400/40 flex items-center gap-1 shadow-xs">
+                  <Crown className="w-3 h-3 text-amber-300" />
+                  Mode Admin: Cari Petugas
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700 flex items-center gap-1">
+                  <Shield className="w-3 h-3 text-slate-400" />
+                  Mode Petugas (Akun Pribadi)
+                </span>
+              )}
+
               {isPwa && (
                 <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-400/30 flex items-center gap-1">
                   <Smartphone className="w-3 h-3 text-indigo-300" />
@@ -501,11 +784,24 @@ export function VoiceAssistant({
               {renderStatusBadge()}
             </div>
 
-            <h3 className="text-sm sm:text-base font-bold text-white mt-1 tracking-tight">
-              Pencarian Jadwal Shift Berbasis Suara
+            <h3 className="text-sm sm:text-base font-bold text-white mt-1 tracking-tight flex items-center gap-2">
+              <span>Pencarian Jadwal Shift Berbasis Suara</span>
+              {effectiveIsAdmin && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 hidden xs:inline">
+                  Akses Admin
+                </span>
+              )}
             </h3>
             <p className="text-xs text-slate-300 mt-0.5 line-clamp-1">
-              Petugas: <span className="font-semibold text-teal-300">{activeProfileName}</span> &bull; RSUD Sultan Muhammad Jamaludin I
+              {effectiveIsAdmin ? (
+                <span>
+                  👑 <span className="text-amber-300 font-semibold">Admin dapat mencari jadwal seluruh petugas terdaftar</span> dengan menyebut Nama Petugas + Tanggal + Bulan shift.
+                </span>
+              ) : (
+                <span>
+                  Petugas: <span className="font-semibold text-teal-300">{activeProfileName}</span> &bull; RSUD Sultan Muhammad Jamaludin I
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -872,20 +1168,84 @@ export function VoiceAssistant({
                     {responseMessage}
                   </p>
 
-                  {matchedAssignmentResult && (
-                    <div className="mt-2 pt-2 border-t border-teal-500/20 flex flex-wrap items-center gap-2 text-[11px]">
-                      <span className="bg-teal-900/70 text-teal-200 px-2 py-0.5 rounded font-mono">
-                        Tanggal: {matchedAssignmentResult.shift_date}
-                      </span>
-                      <span
-                        className="px-2 py-0.5 rounded text-white font-bold"
-                        style={{
-                          backgroundColor:
-                            matchedAssignmentResult.shift?.color_code || '#0d9488',
-                        }}
-                      >
-                        {matchedAssignmentResult.shift?.name || 'Shift Jaga'}
-                      </span>
+                  {/* Matched Staff & Shift Detailed Card */}
+                  {matchedTargetProfile && (
+                    <div className="mt-2.5 pt-2.5 border-t border-teal-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/90 p-3 rounded-xl border border-teal-500/30">
+                      <div className="flex items-center gap-2.5">
+                        <img
+                          src={matchedTargetProfile.avatar_url || '/src/assets/images/avatar_tasman_1791739900476.jpg'}
+                          alt={matchedTargetProfile.full_name}
+                          className="w-10 h-10 rounded-full object-cover border-2 border-teal-400 shrink-0"
+                        />
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-white text-xs">
+                              {matchedTargetProfile.full_name}
+                            </span>
+                            {isStaffSearchMatched ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/40 flex items-center gap-1">
+                                <Crown className="w-2.5 h-2.5 text-amber-300" />
+                                Hasil Pencarian Admin
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                                Jadwal Dinas Anda
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-300 mt-0.5">
+                            {matchedTargetProfile.position || 'Petugas Laboratorium'}
+                            {matchedTargetProfile.nip_str ? ` &bull; NIP ${matchedTargetProfile.nip_str}` : ''}
+                          </p>
+
+                          {/* Shift detail pill */}
+                          <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[11px]">
+                            {matchedAssignmentResult ? (
+                              <>
+                                <span
+                                  className="px-2.5 py-0.5 rounded-full text-white font-bold text-[11px] shadow-xs"
+                                  style={{
+                                    backgroundColor:
+                                      matchedAssignmentResult.shift?.color_code || '#0d9488',
+                                  }}
+                                >
+                                  {matchedAssignmentResult.shift?.name || 'Shift Jaga'}
+                                </span>
+                                <span className="bg-slate-800 text-slate-200 px-2 py-0.5 rounded font-mono text-[10px] border border-slate-700">
+                                  {matchedAssignmentResult.shift?.start_time?.slice(0, 5)} -{' '}
+                                  {matchedAssignmentResult.shift?.end_time?.slice(0, 5)} WIB
+                                </span>
+                                <span className="bg-teal-950 text-teal-300 px-2 py-0.5 rounded font-mono text-[10px] border border-teal-600/30">
+                                  Tgl: {matchedAssignmentResult.shift_date}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-amber-300 border border-amber-500/30 font-medium text-[11px]">
+                                Libur Dinas Jaga (Tidak Terjadwal)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action buttons on matched card */}
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                        {matchedAssignmentResult && onSelectAssignment && (
+                          <button
+                            onClick={() => onSelectAssignment(matchedAssignmentResult)}
+                            className="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-bold rounded-lg transition shadow-xs cursor-pointer active:scale-95"
+                          >
+                            Buka Detail Shift
+                          </button>
+                        )}
+                        <button
+                          onClick={() => onFilterStaff('all')}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-medium rounded-lg border border-slate-700 transition cursor-pointer"
+                          title="Tampilkan jadwal semua petugas di kalender"
+                        >
+                          Tampilkan Semua
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -947,7 +1307,11 @@ export function VoiceAssistant({
             type="text"
             value={textInputFallback}
             onChange={(e) => setTextInputFallback(e.target.value)}
-            placeholder="Ketik perintah (contoh: Cek jadwal shift saya tanggal 20 Oktober 2026)"
+            placeholder={
+              effectiveIsAdmin
+                ? "Ketik perintah (contoh: Jadwal shift Siti Rahmawati tanggal 15 Oktober 2026)"
+                : "Ketik perintah (contoh: Cek jadwal shift saya tanggal 15 Oktober 2026)"
+            }
             className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
           />
           <button
@@ -960,42 +1324,116 @@ export function VoiceAssistant({
         </form>
       )}
 
+      {/* Admin Quick Petugas Selection Pills */}
+      {effectiveIsAdmin && effectiveProfiles.length > 0 && (
+        <div className="mt-3.5 pt-3 border-t border-slate-800/80 space-y-1.5 relative z-10">
+          <div className="flex items-center justify-between flex-wrap gap-1 text-[11px]">
+            <span className="font-bold text-amber-300 flex items-center gap-1.5">
+              <Crown className="w-3.5 h-3.5 text-amber-400" />
+              <span>Pencarian Cepat Jadwal Petugas Terdaftar (Uji Suara Admin):</span>
+            </span>
+            <span className="text-[10px] text-slate-400">
+              Klik nama petugas di bawah untuk mencari jadwalnya secara otomatis
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {effectiveProfiles.map((p) => {
+              const clean = cleanTitleFromStaffName(p.full_name);
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => handleTestSampleCommand(`Jadwal shift ${clean} tanggal 15 Oktober 2026`)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-teal-950 text-slate-300 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 text-[11px] font-medium transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                  title={`Cari jadwal ${p.full_name} tanggal 15 Oktober 2026`}
+                >
+                  <UserCheck className="w-3 h-3 text-teal-400" />
+                  <span>{clean} (15 Okt)</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Quick Test Prompt Chips for fast testing by the user */}
-      <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center gap-1.5 flex-wrap text-[11px] text-slate-400 relative z-10">
+      <div className="mt-3 pt-2.5 border-t border-slate-800/60 flex items-center gap-1.5 flex-wrap text-[11px] text-slate-400 relative z-10">
         <span className="font-semibold text-slate-400 flex items-center gap-1 mr-1">
           <HelpCircle className="w-3 h-3 text-teal-400" />
-          Contoh Perintah:
+          {effectiveIsAdmin ? 'Contoh Perintah Admin:' : 'Contoh Perintah:'}
         </span>
-        <button
-          onClick={() => handleTestSampleCommand('Cek jadwal shift saya tanggal 20 Oktober 2026')}
-          className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
-        >
-          &ldquo;Cek jadwal 20 Oktober 2026&rdquo;
-        </button>
-        <button
-          onClick={() => handleTestSampleCommand('Saya shift apa besok?')}
-          className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
-        >
-          &ldquo;Saya shift apa besok?&rdquo;
-        </button>
-        <button
-          onClick={() => handleTestSampleCommand('Tampilkan jadwal saya tanggal 25 Oktober 2026')}
-          className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
-        >
-          &ldquo;Jadwal 25 Oktober 2026&rdquo;
-        </button>
-        <button
-          onClick={() => handleTestSampleCommand('Buka kalender bulan November 2026')}
-          className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
-        >
-          &ldquo;Bulan November 2026&rdquo;
-        </button>
-        <button
-          onClick={() => handleTestSampleCommand('Cek jadwal shift saya hari ini')}
-          className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
-        >
-          &ldquo;Shift hari ini&rdquo;
-        </button>
+        {effectiveIsAdmin ? (
+          <>
+            <button
+              onClick={() => handleTestSampleCommand('Jadwal shift Siti Rahmawati tanggal 15 Oktober 2026')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Jadwal Siti Rahmawati 15 Oktober 2026&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Cari shift Budi Santoso tanggal 15 Oktober 2026')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Cari shift Budi Santoso 15 Oktober 2026&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Jadwal Nurul Hidayah tanggal 15 Oktober 2026')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Jadwal Nurul Hidayah 15 Oktober 2026&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Shift Ahmad Fauzi tanggal 16 Oktober 2026')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Shift Ahmad Fauzi 16 Oktober 2026&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Jadwal Tasman Saputra tanggal 15 Oktober 2026')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Jadwal Tasman Saputra 15 Oktober 2026&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Cek jadwal shift saya hari ini')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Shift saya hari ini&rdquo;
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => handleTestSampleCommand('Cek jadwal shift saya tanggal 20 Oktober 2026')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Cek jadwal 20 Oktober 2026&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Saya shift apa besok?')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Saya shift apa besok?&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Tampilkan jadwal saya tanggal 25 Oktober 2026')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Jadwal 25 Oktober 2026&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Buka kalender bulan November 2026')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Bulan November 2026&rdquo;
+            </button>
+            <button
+              onClick={() => handleTestSampleCommand('Cek jadwal shift saya hari ini')}
+              className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-teal-900/50 hover:text-teal-200 border border-slate-800 hover:border-teal-500/40 transition text-slate-300 cursor-pointer"
+            >
+              &ldquo;Shift hari ini&rdquo;
+            </button>
+          </>
+        )}
       </div>
 
       {/* =========================================================================

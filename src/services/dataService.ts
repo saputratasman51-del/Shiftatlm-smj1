@@ -155,6 +155,110 @@ export const INITIAL_PROFILES: UserProfile[] = [
   },
 ];
 
+export const INITIAL_ASSIGNMENTS: ShiftAssignment[] = [
+  {
+    id: 'assign-init-1',
+    profile_id: 'user-staff-1', // Siti Rahmawati
+    shift_id: 'shift-pagi',
+    shift_date: '2026-10-15',
+    status: 'scheduled',
+    notes: 'Dinas Reguler Laboratorium',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+  {
+    id: 'assign-init-2',
+    profile_id: 'user-staff-2', // Budi Santoso
+    shift_id: 'shift-siang',
+    shift_date: '2026-10-15',
+    status: 'scheduled',
+    notes: 'Jaga Siang Validasi Hasil & Bank Darah',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+  {
+    id: 'assign-init-3',
+    profile_id: 'user-staff-3', // Nurul Hidayah
+    shift_id: 'shift-malam',
+    shift_date: '2026-10-15',
+    status: 'scheduled',
+    notes: 'Jaga Malam IGD, Cito & Bank Darah',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+  {
+    id: 'assign-init-4',
+    profile_id: 'user-staff-4', // Ahmad Fauzi
+    shift_id: 'shift-pagi',
+    shift_date: '2026-10-16',
+    status: 'scheduled',
+    notes: 'Dinas Pagi Flebotomi Rawat Jalan',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+  {
+    id: 'assign-init-5',
+    profile_id: 'user-admin-1', // Tasman Saputra
+    shift_id: 'shift-khusus',
+    shift_date: '2026-10-15',
+    status: 'scheduled',
+    notes: 'Supervisi Mutu dan On-Call Laboratorium',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+  {
+    id: 'assign-init-6',
+    profile_id: 'user-staff-1', // Siti Rahmawati
+    shift_id: 'shift-siang',
+    shift_date: '2026-10-20',
+    status: 'scheduled',
+    notes: 'Pelayanan Hematologi & Kimia Klinik',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+  {
+    id: 'assign-init-7',
+    profile_id: 'user-staff-2', // Budi Santoso
+    shift_id: 'shift-pagi',
+    shift_date: '2026-10-20',
+    status: 'scheduled',
+    notes: 'Dinas Pagi Laboratorium Sentral',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+  {
+    id: 'assign-init-8',
+    profile_id: 'user-staff-3', // Nurul Hidayah
+    shift_id: 'shift-siang',
+    shift_date: '2026-11-05',
+    status: 'scheduled',
+    notes: 'Dinas Siang Bank Darah & PONEK',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+  {
+    id: 'assign-init-9',
+    profile_id: 'user-staff-4', // Ahmad Fauzi
+    shift_id: 'shift-siang',
+    shift_date: '2026-10-22',
+    status: 'scheduled',
+    notes: 'Dinas Siang Pelayanan Mikrobiologi',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+  {
+    id: 'assign-init-10',
+    profile_id: 'user-admin-1', // Tasman Saputra
+    shift_id: 'shift-pagi',
+    shift_date: '2026-10-19',
+    status: 'scheduled',
+    notes: 'Verifikasi & Validasi Reagen Laboratorium',
+    created_by: 'user-admin-1',
+    created_at: '2026-10-01T08:00:00Z',
+  },
+];
+
+
 // Local storage key constants
 const STORAGE_KEYS = {
   PROFILES: 'shift_atlm_profiles',
@@ -469,8 +573,8 @@ class DataService {
     if (!localStorage.getItem(STORAGE_KEYS.ACTIVE_USER_ID)) {
       this.safeLocalStorageSet(STORAGE_KEYS.ACTIVE_USER_ID, INITIAL_PROFILES[0].id);
     }
-    if (!localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS)) {
-      this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify([]));
+    if (!localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS) || JSON.parse(localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS) || '[]').length === 0) {
+      this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(INITIAL_ASSIGNMENTS));
     }
     if (!localStorage.getItem(STORAGE_KEYS.PENDING_TASKS)) {
       this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify([]));
@@ -783,7 +887,11 @@ class DataService {
 
     if (assignments.length === 0) {
       const local = localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS);
-      assignments = local ? JSON.parse(local) : [];
+      assignments = local ? JSON.parse(local) : INITIAL_ASSIGNMENTS;
+      if (assignments.length === 0) {
+        assignments = INITIAL_ASSIGNMENTS;
+        this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(INITIAL_ASSIGNMENTS));
+      }
     }
 
     // Attach shift & profile details
