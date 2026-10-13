@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-export type VoiceAssistantStatus = 'idle' | 'listening' | 'processing' | 'done' | 'error';
+export type VoiceAssistantStatus = 'idle' | 'listening' | 'processing' | 'speaking' | 'done' | 'error';
 
 interface UseVoiceAssistantOptions {
   onCommandRecognized?: (transcript: string) => void;
@@ -23,6 +23,7 @@ export function useVoiceAssistant({
   const [isSupported, setIsSupported] = useState(true);
 
   const recognitionRef = useRef<any>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -30,6 +31,23 @@ export function useVoiceAssistant({
       setIsSupported(false);
       setStatus('error');
     }
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {
+          // ignore
+        }
+      }
+      if ('speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
   }, []);
 
   const speak = useCallback(
@@ -40,9 +58,25 @@ export function useVoiceAssistant({
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'id-ID';
         utterance.rate = 1.0;
+
+        utterance.onstart = () => {
+          setStatus('speaking');
+        };
+
+        utterance.onend = () => {
+          setStatus('done');
+        };
+
+        utterance.onerror = (e) => {
+          console.warn('Speech synthesis error:', e);
+          setStatus('done');
+        };
+
+        utteranceRef.current = utterance;
         window.speechSynthesis.speak(utterance);
       } catch (e) {
-        console.warn('Speech synthesis error:', e);
+        console.warn('Speech synthesis exception:', e);
+        setStatus('done');
       }
     },
     [speechEnabled]
@@ -111,13 +145,19 @@ export function useVoiceAssistant({
         // ignore
       }
     }
+    if ('speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch (e) {
+        // ignore
+      }
+    }
     setStatus('idle');
   }, []);
 
   const setResponseAndSpeak = useCallback(
     (message: string) => {
       setResponseMessage(message);
-      setStatus('done');
       speak(message);
     },
     [speak]
