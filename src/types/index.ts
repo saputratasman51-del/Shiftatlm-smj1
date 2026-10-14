@@ -140,7 +140,7 @@ export interface AuditLog {
   created_at: string;
 }
 
-export type ShiftSwapStatus = 'pending' | 'approved' | 'rejected';
+export type ShiftSwapStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface ShiftSwap {
   id: string;
@@ -156,6 +156,8 @@ export interface ShiftSwap {
   approved_at?: string;
   whatsapp_sent: boolean;
   created_at: string;
+  prior_requester_assignment?: ShiftAssignment | null;
+  prior_target_assignment?: ShiftAssignment | null;
   // Joins
   requester?: UserProfile;
   target_profile?: UserProfile;

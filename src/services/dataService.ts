@@ -1848,8 +1848,6 @@ class DataService {
     swap.approved_by = approverId;
     swap.approved_at = new Date().toISOString();
 
-    await this.saveShiftSwap(swap);
-
     // If approved, automatically update and swap shift assignments on that date in real-time
     if (status === 'approved') {
       const assignments = await this.getAssignments({ date: swap.shift_date });
@@ -1860,6 +1858,10 @@ class DataService {
       const targetAssign = assignments.find(
         (a) => a.profile_id === swap.target_profile_id && a.shift_date === swap.shift_date && a.status !== 'cancelled'
       );
+
+      // Save backups before modifying
+      swap.prior_requester_assignment = reqAssign ? JSON.parse(JSON.stringify(reqAssign)) : null;
+      swap.prior_target_assignment = targetAssign ? JSON.parse(JSON.stringify(targetAssign)) : null;
 
       if (reqAssign && targetAssign) {
         // Swap their shift assignments
@@ -1898,6 +1900,69 @@ class DataService {
       this.notifyListeners({ table: 'ALL', action: 'SYNC' });
     }
 
+    await this.saveShiftSwap(swap);
+    return true;
+  }
+
+  private async revertSwapAssignments(swap: ShiftSwap) {
+    if (swap.status !== 'approved') return;
+
+    if (swap.prior_requester_assignment) {
+      await this.saveAssignment(swap.prior_requester_assignment);
+    } else {
+      const assignments = await this.getAssignments({ date: swap.shift_date });
+      const createdOrMoved = assignments.find(
+        (a) => a.shift_date === swap.shift_date && (a.profile_id === swap.target_profile_id || a.profile_id === swap.requester_id) && a.status === 'swapped'
+      );
+      if (createdOrMoved && !swap.prior_target_assignment) {
+        await this.deleteAssignment(createdOrMoved.id);
+      }
+    }
+
+    if (swap.prior_target_assignment) {
+      await this.saveAssignment(swap.prior_target_assignment);
+    }
+
+    this.broadcastChange('shift_assignments', 'UPDATE');
+    this.notifyListeners({ table: 'shift_assignments', action: 'UPDATE' });
+  }
+
+  public async cancelShiftSwap(id: string, adminId: string): Promise<boolean> {
+    const all = await this.getShiftSwaps();
+    const swap = all.find((s) => s.id === id);
+    if (!swap) return false;
+
+    await this.revertSwapAssignments(swap);
+
+    swap.status = 'cancelled';
+    swap.approved_by = adminId;
+    await this.saveShiftSwap(swap);
+
+    this.logAudit(adminId, 'CANCEL_TUKAR_SHIFT', 'shift_swaps', id, { status: 'cancelled' });
+    this.broadcastChange('shift_swaps', 'UPDATE', swap);
+    return true;
+  }
+
+  public async deleteShiftSwap(id: string): Promise<boolean> {
+    const all = await this.getShiftSwaps();
+    const swap = all.find((s) => s.id === id);
+    if (swap) {
+      await this.revertSwapAssignments(swap);
+    }
+
+    const updated = all.filter((s) => s.id !== id);
+    this.safeLocalStorageSet(STORAGE_KEYS.SHIFT_SWAPS, JSON.stringify(updated));
+
+    if (this.isSupabaseAvailable()) {
+      try {
+        await supabase.from('shift_swaps').delete().eq('id', id);
+      } catch (e) {
+        console.warn('Supabase delete shift swap failed:', e);
+      }
+    }
+
+    this.logAudit(this.getActiveUserId(), 'DELETE_TUKAR_SHIFT', 'shift_swaps', id, {});
+    this.broadcastChange('shift_swaps', 'DELETE', { id });
     return true;
   }
 

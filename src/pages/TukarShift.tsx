@@ -25,6 +25,7 @@ import {
   Share2,
   Users,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString } from '../services/dataService';
@@ -615,24 +616,60 @@ export default function TukarShift() {
                       )}
                     </div>
 
-                    {(isAdmin || isTargetMe) && s.status === 'pending' && (
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handleApprove(s.id)}
-                          className="flex items-center gap-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-3 rounded-xl transition-colors shadow-2xs"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Setujui</span>
-                        </button>
-                        <button
-                          onClick={() => handleReject(s.id)}
-                          className="flex items-center gap-1 bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold py-2 px-3 rounded-xl transition-colors"
-                        >
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>Tolak</span>
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {(isAdmin || isTargetMe) && s.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleApprove(s.id)}
+                            className="flex items-center gap-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-3 rounded-xl transition-colors shadow-2xs"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Setujui</span>
+                          </button>
+                          <button
+                            onClick={() => handleReject(s.id)}
+                            className="flex items-center gap-1 bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold py-2 px-3 rounded-xl transition-colors"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Tolak</span>
+                          </button>
+                        </>
+                      )}
+
+                      {isAdmin && (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {s.status === 'approved' && (
+                            <button
+                              onClick={async () => {
+                                if (window.confirm('Batalkan tukar shift ini? Jadwal petugas akan otomatis dikembalikan ke shift awal.')) {
+                                  await dataService.cancelShiftSwap(s.id, activeProfile.id);
+                                  showToast('Tukar Shift Dibatalkan', 'Jadwal shift petugas dikembalikan ke shift awal secara otomatis.');
+                                  loadData();
+                                }
+                              }}
+                              className="flex items-center gap-1 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold py-2 px-3 rounded-xl transition-colors"
+                            >
+                              <XCircle className="w-3.5 h-3.5 text-amber-700" />
+                              <span>Batalkan &amp; Revert</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={async () => {
+                              if (window.confirm('Hapus pengajuan tukar shift ini? Jika sudah disetujui, jadwal akan dikembalikan ke shift awal.')) {
+                                await dataService.deleteShiftSwap(s.id);
+                                showToast('Tukar Shift Dihapus', 'Data pertukaran shift dihapus dan jadwal dikembalikan.');
+                                loadData();
+                              }
+                            }}
+                            className="flex items-center gap-1 bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold py-2 px-3 rounded-xl transition-colors"
+                            title="Hapus tukar shift dan kembalikan jadwal"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Hapus</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
