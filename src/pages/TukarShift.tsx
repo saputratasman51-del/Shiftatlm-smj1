@@ -48,6 +48,7 @@ export default function TukarShift() {
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [isManualShiftOverride, setIsManualShiftOverride] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [filterTab, setFilterTab] = useState<'all' | 'reminders' | 'pending' | 'approved'>('all');
   const [formData, setFormData] = useState({
     shift_date: getPontianakDateString(),
@@ -155,6 +156,7 @@ export default function TukarShift() {
       reason: '',
     });
     setIsManualShiftOverride(false);
+    setIsSubmitting(false);
     setModalOpen(true);
   };
 
@@ -175,22 +177,35 @@ export default function TukarShift() {
       return;
     }
 
-    const newSwap: ShiftSwap = {
-      id: `swap-${Date.now()}`,
-      requester_id: activeProfile.id,
-      target_profile_id: formData.target_profile_id,
-      shift_date: formData.shift_date,
-      shift_id: formData.shift_id,
-      reason: formData.reason,
-      status: 'pending',
-      whatsapp_sent: false,
-      created_at: new Date().toISOString(),
-    };
+    if (!formData.reason.trim()) {
+      showToast('Alasan Diperlukan', 'Harap isi alasan permohonan pertukaran shift', 'error');
+      return;
+    }
 
-    await dataService.saveShiftSwap(newSwap);
-    showToast('Pengajuan Terkirim', 'Pengajuan tukar shift berhasil dibuat.');
-    setModalOpen(false);
-    loadData();
+    setIsSubmitting(true);
+    try {
+      const newSwap: ShiftSwap = {
+        id: `swap-${Date.now()}`,
+        requester_id: activeProfile.id,
+        target_profile_id: formData.target_profile_id,
+        shift_date: formData.shift_date,
+        shift_id: formData.shift_id,
+        reason: formData.reason.trim(),
+        status: 'pending',
+        whatsapp_sent: false,
+        created_at: new Date().toISOString(),
+      };
+
+      await dataService.saveShiftSwap(newSwap);
+      showToast('Pengajuan Terkirim', 'Pengajuan tukar shift berhasil dibuat dan menunggu persetujuan.');
+      setModalOpen(false);
+      loadData();
+    } catch (err) {
+      console.error('Error saving shift swap:', err);
+      showToast('Gagal Mengirim', 'Terjadi kesalahan sistem saat mengirim pengajuan', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleApprove = async (id: string) => {
@@ -629,54 +644,77 @@ export default function TukarShift() {
 
       {/* Modal Ajukan Tukar Shift */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-200 animate-scale-up">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-sm sm:text-base flex items-center gap-2">
-                <RefreshCw className="w-4 h-4 text-teal-600" />
-                Ajukan Tukar Shift Petugas
-              </h3>
-              <button onClick={() => setModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg">
+        <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 animate-scale-up overflow-hidden my-auto">
+            {/* Header Dialog */}
+            <div className="shrink-0 flex items-center justify-between px-5 sm:px-6 py-4 border-b border-slate-200 bg-white">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 border border-teal-200 flex items-center justify-center shrink-0 shadow-2xs">
+                  <RefreshCw className="w-5 h-5 text-teal-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm sm:text-base tracking-tight">
+                    Ajukan Permohonan Tukar Shift
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Instalasi Laboratorium RSUD Sultan Muhammad Jamaludin I
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                title="Tutup dialog"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateSwap} className="mt-4 space-y-4 text-xs">
-              {/* Petugas Pemohon Info */}
-              <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                <div className="w-8 h-8 rounded-lg bg-teal-600 text-white font-bold flex items-center justify-center shrink-0 text-xs">
+            {/* Scrollable Form Body */}
+            <form
+              id="form-tukar-shift"
+              onSubmit={handleCreateSwap}
+              className="flex-1 overflow-y-auto px-5 sm:px-6 py-4 space-y-4 text-xs sm:text-sm"
+            >
+              {/* Petugas Pemohon Info Card */}
+              <div className="flex items-center gap-3 p-3 bg-slate-50/90 border border-slate-200 rounded-xl">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 text-white font-bold flex items-center justify-center shrink-0 text-xs shadow-2xs">
                   {activeProfile.full_name.slice(0, 2).toUpperCase()}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-slate-800 truncate">{activeProfile.full_name}</p>
-                  <p className="text-[10px] text-slate-500 truncate">{activeProfile.position || 'Petugas ATLM'}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">{activeProfile.full_name}</p>
+                    <span className="text-[10px] font-semibold bg-teal-100/70 text-teal-800 px-2 py-0.5 rounded-full border border-teal-200 shrink-0">
+                      Pemohon
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 truncate mt-0.5">{activeProfile.position || 'Petugas ATLM Laboratorium'}</p>
                 </div>
-                <span className="text-[10px] font-semibold bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full border border-teal-200">
-                  Pemohon
-                </span>
               </div>
 
               {/* 1. Tanggal Shift Yang Ditukar */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Tanggal Shift Yang Ditukar
+              <div className="space-y-1.5">
+                <label className="block text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-teal-600" />
+                  <span>1. Tanggal Shift Yang Ditukar</span>
+                  <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="date"
                   required
                   value={formData.shift_date}
                   onChange={(e) => handleDateChange(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-800 text-xs focus:ring-2 focus:ring-teal-500/20 focus:outline-none"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono font-bold text-slate-900 text-xs sm:text-sm focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:outline-none transition-all shadow-2xs"
                 />
 
                 {/* Quick Date Chips from Officer's Scheduled Shifts */}
                 {myAssignments.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-[10px] text-slate-500 font-semibold flex items-center gap-1">
-                      <Calendar className="w-3 h-3 text-teal-600" />
-                      <span>Jadwal dinas Anda (klik untuk pilih cepat):</span>
+                  <div className="pt-1 space-y-1">
+                    <p className="text-[11px] text-slate-500 font-semibold flex items-center gap-1">
+                      <span>Pilih cepat dari jadwal dinas Anda:</span>
                     </p>
-                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-0.5">
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 bg-slate-50 border border-slate-200 rounded-xl">
                       {myAssignments.map((a) => {
                         const isSelected = a.shift_date === formData.shift_date;
                         return (
@@ -684,15 +722,15 @@ export default function TukarShift() {
                             key={a.id}
                             type="button"
                             onClick={() => handleDateChange(a.shift_date)}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-all flex items-center gap-1 ${
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
                               isSelected
-                                ? 'bg-teal-600 text-white shadow-xs font-bold ring-1 ring-teal-500'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80'
+                                ? 'bg-teal-600 text-white shadow-xs font-bold ring-2 ring-teal-400'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
                             }`}
                           >
                             <span className="font-mono">{a.shift_date}</span>
                             <span>({a.shift?.name || 'Shift'})</span>
-                            {isSelected && <CheckCircle2 className="w-2.5 h-2.5 text-white" />}
+                            {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
                           </button>
                         );
                       })}
@@ -702,72 +740,75 @@ export default function TukarShift() {
               </div>
 
               {/* 2. Jenis Shift Asli Petugas (Otomatis Terbaca) */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block font-bold text-slate-700">
-                    Jenis Shift Asli Petugas
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-teal-600" />
+                    <span>2. Jenis Shift Asli Petugas</span>
+                    <span className="text-rose-500">*</span>
                   </label>
                   {currentDetectedAssignment && !isManualShiftOverride && (
                     <button
                       type="button"
                       onClick={() => setIsManualShiftOverride(true)}
-                      className="text-[10px] font-semibold text-slate-500 hover:text-slate-800 underline"
+                      className="text-[11px] font-semibold text-teal-700 hover:text-teal-900 hover:underline cursor-pointer"
                     >
-                      Pilih shift manual
+                      Ubah shift manual
                     </button>
                   )}
                 </div>
 
                 {currentDetectedAssignment && !isManualShiftOverride ? (
                   /* Auto-detected Shift Display Card */
-                  <div className="p-3 bg-gradient-to-br from-teal-50 to-emerald-50/80 border border-teal-200/90 rounded-xl space-y-1.5 animate-fade-in shadow-xs">
+                  <div className="p-3.5 bg-gradient-to-br from-emerald-50/90 to-teal-50/90 border border-emerald-300/80 rounded-xl space-y-2 animate-fade-in shadow-xs">
                     <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-teal-800">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800">
                         <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>Otomatis Terdeteksi dari Jadwal Anda</span>
+                        <span>Shift Asli Terbaca Otomatis dari Jadwal Anda</span>
                       </span>
-                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-300">
+                      <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
                         {currentDetectedAssignment.shift?.code || shifts.find((s) => s.id === formData.shift_id)?.code || 'SHIFT'}
                       </span>
                     </div>
 
-                    <div className="pt-1 flex items-baseline justify-between gap-2">
+                    <div className="pt-0.5 flex flex-col sm:flex-row sm:items-baseline justify-between gap-1 sm:gap-2">
                       <div>
-                        <p className="text-sm font-black text-slate-900">
+                        <p className="text-sm sm:text-base font-black text-slate-900">
                           {currentDetectedAssignment.shift?.name || shifts.find((s) => s.id === formData.shift_id)?.name}
                         </p>
-                        <p className="text-xs text-slate-600 flex items-center gap-1 font-medium mt-0.5">
-                          <Clock className="w-3.5 h-3.5 text-teal-600" />
+                        <p className="text-xs text-slate-700 flex items-center gap-1.5 font-semibold mt-0.5">
+                          <Clock className="w-3.5 h-3.5 text-emerald-600" />
                           <span>
-                            {currentDetectedAssignment.shift?.start_time.slice(0, 5) || '07:00'} -{' '}
+                            Jam Dinas: {currentDetectedAssignment.shift?.start_time.slice(0, 5) || '07:00'} -{' '}
                             {currentDetectedAssignment.shift?.end_time.slice(0, 5) || '14:00'} WIB
                           </span>
                         </p>
                       </div>
 
                       {currentDetectedAssignment.notes && (
-                        <div className="text-right">
-                          <span className="text-[10px] text-teal-800 bg-white/90 px-2 py-0.5 rounded-md border border-teal-200 inline-block font-medium">
+                        <div>
+                          <span className="text-[11px] text-teal-800 bg-white/90 px-2.5 py-1 rounded-lg border border-teal-200 inline-block font-medium">
                             {currentDetectedAssignment.notes}
                           </span>
                         </div>
                       )}
                     </div>
 
-                    <p className="text-[10px] text-teal-700/90 pt-1.5 border-t border-teal-200/60">
-                      Sistem membaca dinas asli Anda pada tanggal ini. Anda cukup memilih rekan pengganti dan mengisi alasan pertukaran di bawah.
-                    </p>
+                    <div className="text-[11px] text-emerald-800/90 pt-1.5 border-t border-emerald-200/60 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Sistem membaca dinas Anda. Anda cukup memilih rekan pengganti dan mengisi alasan di bawah.</span>
+                    </div>
                   </div>
                 ) : (
                   /* Fallback or Manual Select */
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {!currentDetectedAssignment && (
-                      <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2 text-[11px] text-amber-800">
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-800">
                         <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                         <div>
                           <p className="font-bold">Tidak Ditemukan Jadwal Dinas pada Tanggal Ini</p>
-                          <p className="text-[10px] text-amber-700 mt-0.5">
-                            Anda tidak memiliki jadwal dinas aktif pada tanggal {formData.shift_date}. Silakan pilih jenis shift asli secara manual atau gunakan tombol pilih tanggal di atas.
+                          <p className="text-[11px] text-amber-700 mt-0.5">
+                            Anda tidak memiliki jadwal dinas aktif pada tanggal {formData.shift_date}. Silakan pilih jenis shift asli secara manual atau klik tombol tanggal jadwal di atas.
                           </p>
                         </div>
                       </div>
@@ -777,7 +818,7 @@ export default function TukarShift() {
                       required
                       value={formData.shift_id}
                       onChange={(e) => setFormData({ ...formData, shift_id: e.target.value })}
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-xs text-slate-800 focus:ring-2 focus:ring-teal-500/20 focus:outline-none"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-xs sm:text-sm text-slate-900 focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:outline-none transition-all shadow-2xs"
                     >
                       {shifts.map((s) => (
                         <option key={s.id} value={s.id}>
@@ -793,7 +834,7 @@ export default function TukarShift() {
                           setIsManualShiftOverride(false);
                           setFormData((prev) => ({ ...prev, shift_id: currentDetectedAssignment.shift_id }));
                         }}
-                        className="text-[10px] font-semibold text-teal-700 hover:text-teal-900 flex items-center gap-1 mt-1"
+                        className="text-[11px] font-semibold text-teal-700 hover:text-teal-900 flex items-center gap-1 mt-1 cursor-pointer"
                       >
                         <span>&larr; Kembalikan ke shift otomatis ({currentDetectedAssignment.shift?.name})</span>
                       </button>
@@ -803,15 +844,17 @@ export default function TukarShift() {
               </div>
 
               {/* 3. Pilih Rekan Pengganti (Target) */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Pilih Rekan Pengganti (Target)
+              <div className="space-y-1.5">
+                <label className="block text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-teal-600" />
+                  <span>3. Pilih Rekan Pengganti (Target Jaga)</span>
+                  <span className="text-rose-500">*</span>
                 </label>
                 <select
                   required
                   value={formData.target_profile_id}
                   onChange={(e) => setFormData({ ...formData, target_profile_id: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-xs text-slate-800 focus:ring-2 focus:ring-teal-500/20 focus:outline-none"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-xs sm:text-sm text-slate-900 focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:outline-none transition-all shadow-2xs"
                 >
                   {profiles
                     .filter((p) => p.id !== activeProfile.id)
@@ -824,17 +867,17 @@ export default function TukarShift() {
 
                 {/* Colleague schedule indicator on the chosen date */}
                 {formData.target_profile_id && (
-                  <div className="mt-1.5">
+                  <div className="pt-0.5">
                     {selectedColleagueAssignment ? (
-                      <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200/70 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-                        <Clock className="w-3 h-3 text-amber-600 shrink-0" />
+                      <p className="text-[11px] text-amber-800 bg-amber-50/90 border border-amber-200 rounded-xl p-2.5 flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                         <span>
                           Rekan ini memiliki jadwal <strong>{selectedColleagueAssignment.shift?.name}</strong> pada tanggal yang sama.
                         </span>
                       </p>
                     ) : (
-                      <p className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200/70 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                      <p className="text-[11px] text-emerald-800 bg-emerald-50/90 border border-emerald-200 rounded-xl p-2.5 flex items-center gap-2">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                         <span>Rekan ini bebas tugas / lepas jaga pada tanggal yang dipilih.</span>
                       </p>
                     )}
@@ -843,11 +886,13 @@ export default function TukarShift() {
               </div>
 
               {/* 4. Alasan Pertukaran Shift */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Alasan Pertukaran Shift
+              <div className="space-y-1.5">
+                <label className="block text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <MessageSquare className="w-4 h-4 text-teal-600" />
+                  <span>4. Alasan Pertukaran Shift</span>
+                  <span className="text-rose-500">*</span>
                 </label>
-                <div className="flex flex-wrap gap-1 mb-1.5">
+                <div className="flex flex-wrap gap-1.5">
                   {[
                     'Keperluan Keluarga Mendesak',
                     'Kondisi Kurang Sehat / Sakit',
@@ -858,7 +903,7 @@ export default function TukarShift() {
                       key={quickReason}
                       type="button"
                       onClick={() => setFormData({ ...formData, reason: quickReason })}
-                      className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-teal-50 hover:text-teal-800 text-[10px] text-slate-600 border border-slate-200 transition-colors"
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-teal-50 hover:text-teal-800 text-xs text-slate-700 font-medium border border-slate-200 transition-colors cursor-pointer"
                     >
                       + {quickReason}
                     </button>
@@ -867,31 +912,42 @@ export default function TukarShift() {
                 <textarea
                   rows={3}
                   required
-                  placeholder="Misal: Keperluan keluarga mendadak / Acara penting di luar kota"
+                  placeholder="Contoh: Keperluan keluarga mendadak / Menghadiri acara penting keluarga di luar kota"
                   value={formData.reason}
                   onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                  className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm text-slate-900 focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:outline-none transition-all shadow-2xs"
                 />
               </div>
-
-              {/* Action Buttons */}
-              <div className="pt-3 border-t border-slate-100 flex gap-2">
-                <button
-                  type="submit"
-                  className="flex-1 bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 text-xs"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Kirim Pengajuan</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors text-xs"
-                >
-                  Batal
-                </button>
-              </div>
             </form>
+
+            {/* Modal Sticky Footer - Buttons Always Visible, Prominent & Fully Functional */}
+            <div className="shrink-0 px-5 sm:px-6 py-3.5 border-t border-slate-200 bg-slate-50/95 backdrop-blur-xs flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="px-5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl shadow-xs transition-all active:scale-95 cursor-pointer text-center"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                form="form-tukar-shift"
+                disabled={isSubmitting}
+                className="flex-1 sm:flex-initial min-w-[170px] px-6 py-2.5 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-teal-600 via-teal-500 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Mengirim...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Kirim Pengajuan</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

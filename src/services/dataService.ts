@@ -1829,19 +1829,52 @@ class DataService {
 
     await this.saveShiftSwap(swap);
 
-    // If approved, automatically update shift assignment on that date
+    // If approved, automatically update and swap shift assignments on that date in real-time
     if (status === 'approved') {
       const assignments = await this.getAssignments({ date: swap.shift_date });
-      const existingAssign = assignments.find(
-        (a) => a.profile_id === swap.requester_id && a.shift_id === swap.shift_id
+      
+      const reqAssign = assignments.find(
+        (a) => a.profile_id === swap.requester_id && a.shift_date === swap.shift_date && a.status !== 'cancelled'
+      );
+      const targetAssign = assignments.find(
+        (a) => a.profile_id === swap.target_profile_id && a.shift_date === swap.shift_date && a.status !== 'cancelled'
       );
 
-      if (existingAssign) {
-        existingAssign.profile_id = swap.target_profile_id;
-        existingAssign.status = 'swapped';
-        existingAssign.notes = `Tukar shift disetujui dengan ${swap.requester?.full_name || 'Rekan'}. Alasan: ${swap.reason}`;
-        await this.saveAssignment(existingAssign);
+      if (reqAssign && targetAssign) {
+        // Swap their shift assignments
+        const tempShiftId = reqAssign.shift_id;
+        reqAssign.shift_id = targetAssign.shift_id;
+        targetAssign.shift_id = tempShiftId;
+        reqAssign.status = 'swapped';
+        targetAssign.status = 'swapped';
+        reqAssign.notes = `Tukar shift disetujui dengan ${swap.target_profile?.full_name || 'Rekan'}`;
+        targetAssign.notes = `Tukar shift disetujui dengan ${swap.requester?.full_name || 'Pemohon'}`;
+        await this.saveAssignment(reqAssign);
+        await this.saveAssignment(targetAssign);
+      } else if (reqAssign) {
+        // Transfer requester assignment to target profile
+        reqAssign.profile_id = swap.target_profile_id;
+        reqAssign.status = 'swapped';
+        reqAssign.notes = `Tukar shift disetujui`;
+        await this.saveAssignment(reqAssign);
+      } else {
+        // If requester had no assignment record, create new assignment for target on that shift & date
+        const newAssign: ShiftAssignment = {
+          id: `assign-swap-${Date.now()}`,
+          profile_id: swap.target_profile_id,
+          shift_id: swap.shift_id,
+          shift_date: swap.shift_date,
+          status: 'swapped',
+          notes: 'Hasil pertukaran shift disetujui',
+          created_by: approverId,
+          created_at: new Date().toISOString(),
+        };
+        await this.saveAssignment(newAssign);
       }
+
+      this.broadcastChange('shift_assignments', 'UPDATE');
+      this.notifyListeners({ table: 'shift_assignments', action: 'UPDATE' });
+      this.notifyListeners({ table: 'ALL', action: 'SYNC' });
     }
 
     return true;
