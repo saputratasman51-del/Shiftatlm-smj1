@@ -258,6 +258,351 @@ export const INITIAL_ASSIGNMENTS: ShiftAssignment[] = [
   },
 ];
 
+export const INITIAL_HANDOVERS: Handover[] = [
+  {
+    id: 'ho-init-1',
+    shift_date: '2026-10-14',
+    shift_from_id: 'shift-pagi',
+    shift_to_id: 'shift-siang',
+    giver_profile_id: 'user-staff-1', // Siti Rahmawati
+    receiver_profile_id: 'user-staff-2', // Budi Santoso
+    status: 'received',
+    given_at: '2026-10-14 14:00:00',
+    received_at: '2026-10-14 14:08:00',
+    total_patients: 16,
+    revision_notes: '',
+    categories_data: {
+      'cat-1': { category_id: 'cat-1', patient_count: 6, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Pelayanan lancar, reagen terkalibrasi', work_status: 'selesai' },
+      'cat-2': { category_id: 'cat-2', patient_count: 4, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Sampel terambil dan teranalisis lengkap', work_status: 'selesai' },
+      'cat-3': { category_id: 'cat-3', patient_count: 3, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Pemeriksaan cito terlayani tepat waktu', work_status: 'selesai' },
+      'cat-4': { category_id: 'cat-4', patient_count: 3, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Pemeriksaan elektrolit terlaporkan', work_status: 'selesai' },
+    },
+    lab_conditions: [
+      { id: 'cond-1-1', category: 'alat', item_name: 'Sysmex XP-100 Hematology', status: 'baik', description: 'Background check normal, running kontrol OK' },
+      { id: 'cond-1-2', category: 'alat', item_name: 'Mindray BS-120 Chemistry', status: 'baik', description: 'Suhu inkubasi stabil 37°C, kalibrasi harian OK' },
+      { id: 'cond-1-3', category: 'reagen', item_name: 'Reagen Cellpack & Stromatolyser', status: 'normal', description: 'Stok mencukupi untuk 3 hari' },
+      { id: 'cond-1-4', category: 'ruang_kerja', item_name: 'Suhu Ruangan & Kulkas Reagen (2-8°C)', status: 'normal', description: 'Suhu kulkas 3.8°C terpantau di termometer digital' }
+    ],
+    pending_tasks: [
+      { id: 'task-1-1', handover_id: 'ho-init-1', task_type: 'Validasi Hasil Kimia Darah Ruang Melati', description: 'Hasil fungsi ginjal pasien Ny. Warsini sudah dikirim ke ruangan', priority: 'sedang', status: 'selesai', assigned_to: 'user-staff-2', created_by: 'user-staff-1', created_at: '2026-10-14T14:02:00Z' }
+    ],
+    status_logs: [
+      { id: 'log-ho-1-1', handover_id: 'ho-init-1', previous_status: 'draft', new_status: 'pending', changed_by: 'user-staff-1', changer_name: 'Siti Rahmawati, A.Md.AK', notes: 'Dokumen serah terima shift pagi dikirimkan', created_at: '2026-10-14T14:00:00Z' },
+      { id: 'log-ho-1-2', handover_id: 'ho-init-1', previous_status: 'pending', new_status: 'received', changed_by: 'user-staff-2', changer_name: 'Budi Santoso, A.Md.Kes', notes: 'Diterima resmi oleh petugas shift siang', created_at: '2026-10-14T14:08:00Z' }
+    ],
+    created_at: '2026-10-14T07:00:00Z',
+    updated_at: '2026-10-14T07:08:00Z',
+  },
+  {
+    id: 'ho-init-2',
+    shift_date: '2026-10-15',
+    shift_from_id: 'shift-pagi',
+    shift_to_id: 'shift-siang',
+    giver_profile_id: 'user-staff-1', // Siti Rahmawati
+    receiver_profile_id: 'user-staff-2', // Budi Santoso (Admin / ATLM)
+    status: 'pending', // Menunggu Penerimaan!
+    given_at: '2026-10-15 14:00:00',
+    total_patients: 15,
+    revision_notes: '',
+    categories_data: {
+      'cat-1': { category_id: 'cat-1', patient_count: 5, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Rawat jalan selesai tertangani', work_status: 'selesai' },
+      'cat-2': { category_id: 'cat-2', patient_count: 4, ongoing_tests: 'Crossmatch PRC 1 kolf pasien Bedah', pending_samples: '', unverified_results: '', issues_notes: 'Inkubasi fase 2 selesai pkl 14:30 WIB', work_status: 'proses' },
+      'cat-3': { category_id: 'cat-3', patient_count: 3, ongoing_tests: '', pending_samples: '1 tabung EDTA IGD lisis', unverified_results: '', issues_notes: 'Menunggu kiriman resample dari perawat IGD', work_status: 'tindak_lanjut' },
+      'cat-15': { category_id: 'cat-15', patient_count: 2, ongoing_tests: '', pending_samples: '', unverified_results: 'Kalium kritis 6.5 mEq/L (Tn. Bambang/ICU)', issues_notes: 'Nilai kritis sudah dilaporkan per telepon ke dr. Jaga ICU', work_status: 'selesai' },
+      'cat-13': { category_id: 'cat-13', patient_count: 1, ongoing_tests: 'Uji silang serasi darah elektif', pending_samples: '', unverified_results: '', issues_notes: 'Kantung darah sudah disiapkan di kulkas bank darah', work_status: 'proses' },
+    },
+    lab_conditions: [
+      { id: 'cond-2-1', category: 'alat', item_name: 'Sysmex XP-100 Hematology', status: 'baik', description: 'Lolos background check harian, tidak ada kendala clot' },
+      { id: 'cond-2-2', category: 'alat', item_name: 'Mindray BS-120 Chemistry', status: 'baik', description: 'Reagen stabil, lampu fotometer normal' },
+      { id: 'cond-2-3', category: 'reagen', item_name: 'Reagen Gel Crossmatch & Bovine Albumin', status: 'normal', description: 'Stok mencukupi, expired date masih panjang (2027)' },
+      { id: 'cond-2-4', category: 'ruang_kerja', item_name: 'Suhu Ruangan AC Lab & Cold Chain', status: 'normal', description: 'Suhu ruangan 20°C, kulkas darah 4.0°C stabil' }
+    ],
+    pending_tasks: [
+      { id: 'task-2-1', handover_id: 'ho-init-2', task_type: 'Cito Tindak Lanjut Crossmatch Ruang Bedah', description: 'Pasien Tn. Hasanuddin (Bedah) membutuhkan darah PRC 1 kolf sebelum jam 16:00', priority: 'tinggi_cito', status: 'belum_dikerjakan', assigned_to: 'user-staff-2', created_by: 'user-staff-1', created_at: '2026-10-15T14:00:00Z' },
+      { id: 'task-2-2', handover_id: 'ho-init-2', task_type: 'Konfirmasi Resample EDTA Pasien IGD', description: 'Sampel ulang darah lengkap Ny. Mariana ditunggu dari perawat IGD', priority: 'sedang', status: 'belum_dikerjakan', assigned_to: 'user-staff-2', created_by: 'user-staff-1', created_at: '2026-10-15T14:00:00Z' }
+    ],
+    status_logs: [
+      { id: 'log-ho-2-1', handover_id: 'ho-init-2', previous_status: 'draft', new_status: 'pending', changed_by: 'user-staff-1', changer_name: 'Siti Rahmawati, A.Md.AK', notes: 'Dokumen serah terima shift pagi dikirimkan, menunggu konfirmasi petugas shift siang', created_at: '2026-10-15T14:00:00Z' }
+    ],
+    created_at: '2026-10-15T07:00:00Z',
+    updated_at: '2026-10-15T07:00:00Z',
+  },
+  {
+    id: 'ho-init-3',
+    shift_date: '2026-09-28',
+    shift_from_id: 'shift-siang',
+    shift_to_id: 'shift-malam',
+    giver_profile_id: 'user-staff-2', // Budi Santoso
+    receiver_profile_id: 'user-staff-3', // Nurul Hidayah
+    status: 'received',
+    given_at: '2026-09-28 21:00:00',
+    received_at: '2026-09-28 21:07:00',
+    total_patients: 19,
+    revision_notes: '',
+    categories_data: {
+      'cat-1': { category_id: 'cat-1', patient_count: 7, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Lancar', work_status: 'selesai' },
+      'cat-2': { category_id: 'cat-2', patient_count: 6, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Selesai dianalisis', work_status: 'selesai' },
+      'cat-3': { category_id: 'cat-3', patient_count: 4, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Cito IGD tertangani', work_status: 'selesai' },
+      'cat-13': { category_id: 'cat-13', patient_count: 2, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Crossmatch 2 kolf siap', work_status: 'selesai' },
+    },
+    lab_conditions: [
+      { id: 'cond-3-1', category: 'alat', item_name: 'Sysmex XP-100', status: 'baik', description: 'Normal' },
+      { id: 'cond-3-2', category: 'alat', item_name: 'Mindray BS-120', status: 'baik', description: 'Normal' },
+    ],
+    pending_tasks: [],
+    status_logs: [
+      { id: 'log-ho-3-1', handover_id: 'ho-init-3', previous_status: 'draft', new_status: 'received', changed_by: 'user-staff-3', changer_name: 'Nurul Hidayah', notes: 'Diterima resmi shift malam', created_at: '2026-09-28T21:07:00Z' }
+    ],
+    created_at: '2026-09-28T14:00:00Z',
+    updated_at: '2026-09-28T14:07:00Z',
+  },
+  {
+    id: 'ho-init-4',
+    shift_date: '2026-09-12',
+    shift_from_id: 'shift-pagi',
+    shift_to_id: 'shift-siang',
+    giver_profile_id: 'user-staff-1', // Siti
+    receiver_profile_id: 'user-staff-4', // Ahmad
+    status: 'received',
+    given_at: '2026-09-12 14:00:00',
+    received_at: '2026-09-12 14:05:00',
+    total_patients: 22,
+    revision_notes: '',
+    categories_data: {
+      'cat-1': { category_id: 'cat-1', patient_count: 10, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Pemeriksaan rutin lengkap', work_status: 'selesai' },
+      'cat-2': { category_id: 'cat-2', patient_count: 8, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+      'cat-4': { category_id: 'cat-4', patient_count: 4, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+    },
+    lab_conditions: [
+      { id: 'cond-4-1', category: 'alat', item_name: 'Sysmex XP-100', status: 'baik', description: 'Kondisi prima' }
+    ],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-09-12T07:00:00Z',
+    updated_at: '2026-09-12T07:05:00Z',
+  },
+  {
+    id: 'ho-init-5',
+    shift_date: '2026-08-25',
+    shift_from_id: 'shift-malam',
+    shift_to_id: 'shift-pagi',
+    giver_profile_id: 'user-staff-3', // Nurul
+    receiver_profile_id: 'user-staff-1', // Siti
+    status: 'received',
+    given_at: '2026-08-25 07:00:00',
+    received_at: '2026-08-25 07:08:00',
+    total_patients: 17,
+    revision_notes: '',
+    categories_data: {
+      'cat-3': { category_id: 'cat-3', patient_count: 6, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+      'cat-2': { category_id: 'cat-2', patient_count: 8, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+      'cat-15': { category_id: 'cat-15', patient_count: 3, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: 'Nilai kritis terlaporkan', work_status: 'selesai' },
+    },
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-08-25T00:00:00Z',
+    updated_at: '2026-08-25T00:08:00Z',
+  },
+  {
+    id: 'ho-init-6',
+    shift_date: '2026-08-10',
+    shift_from_id: 'shift-pagi',
+    shift_to_id: 'shift-siang',
+    giver_profile_id: 'user-staff-4', // Ahmad
+    receiver_profile_id: 'user-staff-2', // Budi
+    status: 'received',
+    given_at: '2026-08-10 14:00:00',
+    received_at: '2026-08-10 14:06:00',
+    total_patients: 24,
+    revision_notes: '',
+    categories_data: {
+      'cat-1': { category_id: 'cat-1', patient_count: 12, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+      'cat-2': { category_id: 'cat-2', patient_count: 8, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+      'cat-4': { category_id: 'cat-4', patient_count: 4, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+    },
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-08-10T07:00:00Z',
+    updated_at: '2026-08-10T07:06:00Z',
+  },
+  {
+    id: 'ho-init-7',
+    shift_date: '2026-07-20',
+    shift_from_id: 'shift-siang',
+    shift_to_id: 'shift-malam',
+    giver_profile_id: 'user-staff-2',
+    receiver_profile_id: 'user-staff-3',
+    status: 'received',
+    given_at: '2026-07-20 21:00:00',
+    received_at: '2026-07-20 21:05:00',
+    total_patients: 20,
+    revision_notes: '',
+    categories_data: {
+      'cat-1': { category_id: 'cat-1', patient_count: 8, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+      'cat-2': { category_id: 'cat-2', patient_count: 8, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+      'cat-3': { category_id: 'cat-3', patient_count: 4, ongoing_tests: '', pending_samples: '', unverified_results: '', issues_notes: '', work_status: 'selesai' },
+    },
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-07-20T14:00:00Z',
+    updated_at: '2026-07-20T14:05:00Z',
+  },
+  {
+    id: 'ho-init-8',
+    shift_date: '2026-06-15',
+    shift_from_id: 'shift-pagi',
+    shift_to_id: 'shift-siang',
+    giver_profile_id: 'user-staff-1',
+    receiver_profile_id: 'user-staff-2',
+    status: 'received',
+    given_at: '2026-06-15 14:00:00',
+    received_at: '2026-06-15 14:05:00',
+    total_patients: 18,
+    revision_notes: '',
+    categories_data: {},
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-06-15T07:00:00Z',
+    updated_at: '2026-06-15T07:05:00Z',
+  },
+  {
+    id: 'ho-init-9',
+    shift_date: '2026-05-18',
+    shift_from_id: 'shift-siang',
+    shift_to_id: 'shift-malam',
+    giver_profile_id: 'user-staff-2',
+    receiver_profile_id: 'user-staff-3',
+    status: 'received',
+    given_at: '2026-05-18 21:00:00',
+    received_at: '2026-05-18 21:06:00',
+    total_patients: 21,
+    revision_notes: '',
+    categories_data: {},
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-05-18T14:00:00Z',
+    updated_at: '2026-05-18T14:06:00Z',
+  },
+  {
+    id: 'ho-init-10',
+    shift_date: '2026-04-22',
+    shift_from_id: 'shift-malam',
+    shift_to_id: 'shift-pagi',
+    giver_profile_id: 'user-staff-3',
+    receiver_profile_id: 'user-staff-1',
+    status: 'received',
+    given_at: '2026-04-22 07:00:00',
+    received_at: '2026-04-22 07:05:00',
+    total_patients: 16,
+    revision_notes: '',
+    categories_data: {},
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-04-22T00:00:00Z',
+    updated_at: '2026-04-22T00:05:00Z',
+  },
+  {
+    id: 'ho-init-11',
+    shift_date: '2026-03-10',
+    shift_from_id: 'shift-pagi',
+    shift_to_id: 'shift-siang',
+    giver_profile_id: 'user-staff-1',
+    receiver_profile_id: 'user-staff-2',
+    status: 'received',
+    given_at: '2026-03-10 14:00:00',
+    received_at: '2026-03-10 14:07:00',
+    total_patients: 25,
+    revision_notes: '',
+    categories_data: {},
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-03-10T07:00:00Z',
+    updated_at: '2026-03-10T07:07:00Z',
+  },
+  {
+    id: 'ho-init-12',
+    shift_date: '2026-02-14',
+    shift_from_id: 'shift-siang',
+    shift_to_id: 'shift-malam',
+    giver_profile_id: 'user-staff-2',
+    receiver_profile_id: 'user-staff-3',
+    status: 'received',
+    given_at: '2026-02-14 21:00:00',
+    received_at: '2026-02-14 21:05:00',
+    total_patients: 19,
+    revision_notes: '',
+    categories_data: {},
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-02-14T14:00:00Z',
+    updated_at: '2026-02-14T14:05:00Z',
+  },
+  {
+    id: 'ho-init-13',
+    shift_date: '2026-01-20',
+    shift_from_id: 'shift-pagi',
+    shift_to_id: 'shift-siang',
+    giver_profile_id: 'user-staff-4',
+    receiver_profile_id: 'user-staff-1',
+    status: 'received',
+    given_at: '2026-01-20 14:00:00',
+    received_at: '2026-01-20 14:08:00',
+    total_patients: 23,
+    revision_notes: '',
+    categories_data: {},
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-01-20T07:00:00Z',
+    updated_at: '2026-01-20T07:08:00Z',
+  },
+  {
+    id: 'ho-init-14',
+    shift_date: '2026-10-08',
+    shift_from_id: 'shift-siang',
+    shift_to_id: 'shift-malam',
+    giver_profile_id: 'user-staff-2',
+    receiver_profile_id: 'user-staff-3',
+    status: 'received',
+    given_at: '2026-10-08 21:00:00',
+    received_at: '2026-10-08 21:04:00',
+    total_patients: 18,
+    revision_notes: '',
+    categories_data: {},
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-10-08T14:00:00Z',
+    updated_at: '2026-10-08T14:04:00Z',
+  },
+  {
+    id: 'ho-init-15',
+    shift_date: '2026-10-01',
+    shift_from_id: 'shift-malam',
+    shift_to_id: 'shift-pagi',
+    giver_profile_id: 'user-staff-3',
+    receiver_profile_id: 'user-staff-1',
+    status: 'received',
+    given_at: '2026-10-01 07:00:00',
+    received_at: '2026-10-01 07:05:00',
+    total_patients: 14,
+    revision_notes: '',
+    categories_data: {},
+    lab_conditions: [],
+    pending_tasks: [],
+    status_logs: [],
+    created_at: '2026-10-01T00:00:00Z',
+    updated_at: '2026-10-01T00:05:00Z',
+  }
+];
 
 // Local storage key constants
 const STORAGE_KEYS = {
@@ -576,11 +921,24 @@ class DataService {
     if (!localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS) || JSON.parse(localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS) || '[]').length === 0) {
       this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(INITIAL_ASSIGNMENTS));
     }
-    if (!localStorage.getItem(STORAGE_KEYS.PENDING_TASKS)) {
-      this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify([]));
+    const storedHandoversStr = localStorage.getItem(STORAGE_KEYS.HANDOVERS);
+    if (!storedHandoversStr || JSON.parse(storedHandoversStr || '[]').length === 0) {
+      this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(INITIAL_HANDOVERS));
+    } else {
+      try {
+        const storedHandovers: Handover[] = JSON.parse(storedHandoversStr);
+        const missing = INITIAL_HANDOVERS.filter((init) => !storedHandovers.some((s) => s.id === init.id));
+        if (missing.length > 0) {
+          const merged = [...storedHandovers, ...missing];
+          this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(merged));
+        }
+      } catch (e) {
+        this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(INITIAL_HANDOVERS));
+      }
     }
-    if (!localStorage.getItem(STORAGE_KEYS.HANDOVERS)) {
-      this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify([]));
+    if (!localStorage.getItem(STORAGE_KEYS.PENDING_TASKS) || JSON.parse(localStorage.getItem(STORAGE_KEYS.PENDING_TASKS) || '[]').length === 0) {
+      const initTasks = INITIAL_HANDOVERS.flatMap((h) => h.pending_tasks || []);
+      this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify(initTasks));
     }
     if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
       this.safeLocalStorageSet(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify([]));
@@ -1050,7 +1408,7 @@ class DataService {
         if (filters?.date) query = query.eq('shift_date', filters.date);
         if (filters?.status) query = query.eq('status', filters.status);
         const { data, error } = await query;
-        if (!error && data) {
+        if (!error && data && data.length > 0) {
           handovers = data;
           if (!filters?.date && !filters?.status) {
             this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(data));
@@ -1063,7 +1421,11 @@ class DataService {
 
     if (handovers.length === 0) {
       const local = localStorage.getItem(STORAGE_KEYS.HANDOVERS);
-      handovers = local ? JSON.parse(local) : [];
+      handovers = local ? JSON.parse(local) : INITIAL_HANDOVERS;
+      if (handovers.length === 0) {
+        handovers = INITIAL_HANDOVERS;
+        this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(INITIAL_HANDOVERS));
+      }
     }
 
     // Attach shift & profile details
@@ -1104,6 +1466,9 @@ class DataService {
     }
     handover.total_patients = calculatedTotal;
     handover.updated_at = new Date().toISOString();
+    if (!handover.created_at) {
+      handover.created_at = new Date().toISOString();
+    }
 
     const idx = all.findIndex((h) => h.id === handover.id);
     const prevStatus = idx >= 0 ? all[idx].status : undefined;
@@ -1126,6 +1491,31 @@ class DataService {
     const updated = idx >= 0 ? all.map((h) => (h.id === handover.id ? handover : h)) : [handover, ...all];
     this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(updated));
 
+    // Also sync pending tasks to tasks storage
+    if (handover.pending_tasks && handover.pending_tasks.length > 0) {
+      try {
+        const existingTasks = await this.getPendingTasks();
+        let tasksUpdated = false;
+        const mergedTasks = [...existingTasks];
+        handover.pending_tasks.forEach((pt) => {
+          const pIdx = mergedTasks.findIndex((t) => t.id === pt.id);
+          if (pIdx >= 0) {
+            mergedTasks[pIdx] = { ...mergedTasks[pIdx], ...pt, handover_id: handover.id };
+            tasksUpdated = true;
+          } else {
+            mergedTasks.unshift({ ...pt, handover_id: handover.id });
+            tasksUpdated = true;
+          }
+        });
+        if (tasksUpdated) {
+          this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify(mergedTasks));
+          this.broadcastChange('pending_tasks', 'INSERT', mergedTasks);
+        }
+      } catch (e) {
+        console.warn('Error syncing pending tasks from handover:', e);
+      }
+    }
+
     if (this.isSupabaseAvailable()) {
       try {
         const cleanPayload = {
@@ -1144,6 +1534,8 @@ class DataService {
           lab_conditions: handover.lab_conditions || [],
           pending_tasks: handover.pending_tasks || [],
           status_logs: handover.status_logs || [],
+          created_at: handover.created_at || new Date().toISOString(),
+          updated_at: handover.updated_at || new Date().toISOString(),
         };
         const { error } = await supabase.from('handovers').upsert(cleanPayload);
         if (error) {

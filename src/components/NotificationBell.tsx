@@ -16,39 +16,49 @@ import {
   Flame,
   X,
   UserCheck,
+  Inbox,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString } from '../services/dataService';
-import { ShiftSwap } from '../types';
+import { ShiftSwap, Handover } from '../types';
 import { playAlarmSound } from '../utils/alarmSound';
 
 export function NotificationBell() {
   const { activeProfile, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [swaps, setSwaps] = useState<ShiftSwap[]>([]);
+  const [pendingHandovers, setPendingHandovers] = useState<Handover[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'reminders' | 'approved' | 'pending'>('all');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const todayStr = getPontianakDateString();
 
-  const fetchSwaps = async () => {
+  const fetchNotifications = async () => {
     try {
-      const all = await dataService.getShiftSwaps();
-      setSwaps(all);
+      const [allSwaps, allHo] = await Promise.all([
+        dataService.getShiftSwaps(),
+        dataService.getHandovers(),
+      ]);
+      setSwaps(allSwaps);
+      const pendingHo = allHo.filter(
+        (h) => h.status === 'pending' && (isAdmin || h.receiver_profile_id === activeProfile?.id)
+      );
+      setPendingHandovers(pendingHo);
     } catch (e) {
-      console.warn('Failed to fetch notification swaps:', e);
+      console.warn('Failed to fetch notifications:', e);
     }
   };
 
   useEffect(() => {
-    fetchSwaps();
-    // Poll every 10s for live notification updates & subscribe
-    const interval = setInterval(fetchSwaps, 10000);
+    fetchNotifications();
+    // Poll every 8s for live notification updates & subscribe
+    const interval = setInterval(fetchNotifications, 8000);
     const unsubscribe = dataService.subscribe((event) => {
-      if (event.table === 'shift_swaps' || event.table === 'ALL') {
-        fetchSwaps();
+      if (event.table === 'shift_swaps' || event.table === 'handovers' || event.table === 'ALL') {
+        fetchNotifications();
       }
     });
 
@@ -56,7 +66,7 @@ export function NotificationBell() {
       clearInterval(interval);
       unsubscribe();
     };
-  }, [activeProfile]);
+  }, [activeProfile?.id, isAdmin]);
 
   // Close on outside click
   useEffect(() => {
@@ -89,7 +99,7 @@ export function NotificationBell() {
   const hasHariHToday = upcomingReminders.some((s) => s.shift_date === todayStr);
 
   // Total notification count
-  const count = pendingSwaps.length + upcomingReminders.length;
+  const count = pendingSwaps.length + upcomingReminders.length + pendingHandovers.length;
 
   const getDaysDiff = (dateStr: string) => {
     const today = new Date(todayStr);
@@ -212,7 +222,7 @@ export function NotificationBell() {
                       : 'text-slate-300 hover:text-white hover:bg-slate-800'
                   }`}
                 >
-                  Semua ({upcomingReminders.length + pendingSwaps.length})
+                  Semua ({upcomingReminders.length + pendingSwaps.length + pendingHandovers.length})
                 </button>
                 <button
                   onClick={() => setActiveTab('reminders')}
@@ -243,7 +253,7 @@ export function NotificationBell() {
                       : 'text-slate-300 hover:text-white hover:bg-slate-800'
                   }`}
                 >
-                  Pending ({pendingSwaps.length})
+                  Pending ({pendingSwaps.length + pendingHandovers.length})
                 </button>
               </div>
             </div>
@@ -465,9 +475,57 @@ export function NotificationBell() {
                         </div>
                       );
                     })
-                  ) : (
+                  ) : pendingHandovers.length === 0 ? (
                     <p className="text-center text-xs text-slate-400 py-3">Tidak ada pengajuan pending</p>
-                  )}
+                  ) : null}
+                </div>
+              )}
+
+              {/* 4. PENDING HANDOVERS (SERAH TERIMA JAGA) */}
+              {(activeTab === 'all' || activeTab === 'pending') && pendingHandovers.length > 0 && (
+                <div className="space-y-2">
+                  <div className="px-2 py-1 text-xs font-bold uppercase tracking-wider text-teal-900 bg-teal-50 rounded-lg flex items-center justify-between border border-teal-200">
+                    <span className="flex items-center gap-1.5">
+                      <Inbox className="w-3.5 h-3.5 text-teal-600" />
+                      Operan Shift Menunggu Konfirmasi
+                    </span>
+                    <span className="text-xs bg-teal-200 text-teal-900 px-2 py-0.5 rounded-md font-mono font-semibold">
+                      {pendingHandovers.length}
+                    </span>
+                  </div>
+
+                  {pendingHandovers.map((h) => (
+                    <div
+                      key={`ho-notif-${h.id}`}
+                      onClick={() => {
+                        setIsOpen(false);
+                        navigate(`/serah-terima?id=${h.id}`);
+                      }}
+                      className="p-3 bg-gradient-to-r from-teal-50/70 to-white hover:bg-teal-50 border border-teal-200 rounded-xl transition-all cursor-pointer space-y-2 shadow-2xs group"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
+                        <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                          {h.shift_from?.name || 'Shift Asal'} &rarr; {h.shift_to?.name || 'Shift Tujuan'}
+                        </span>
+                        <span className="text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full animate-pulse">
+                          Perlu Konfirmasi
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] sm:text-xs text-slate-700 leading-relaxed break-words bg-white p-2 rounded-lg border border-slate-100">
+                        Operan dari <strong className="text-slate-900">{h.giver?.full_name || 'Petugas'}</strong> pada{' '}
+                        <span className="font-mono font-bold text-teal-800">{h.shift_date}</span> ({h.total_patients} pasien).
+                      </p>
+
+                      <div className="flex items-center justify-between text-xs pt-0.5">
+                        <span className="font-mono text-[10px] text-slate-400">Pukul {h.given_at?.slice(11, 16)} WIB</span>
+                        <span className="font-bold text-teal-700 group-hover:text-teal-800 group-hover:underline inline-flex items-center gap-1">
+                          Buka &amp; Konfirmasi &rarr;
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

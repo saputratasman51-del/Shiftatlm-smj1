@@ -20,7 +20,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getPontianakTimeString } from '../services/dataService';
+import { dataService, getPontianakTimeString } from '../services/dataService';
 import { Avatar } from './Avatar';
 import { NotificationBell } from './NotificationBell';
 import { TodayShiftAlarmModal } from './TodayShiftAlarmModal';
@@ -54,6 +54,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [showSimulateList, setShowSimulateList] = useState(false);
+  const [pendingHandoversCount, setPendingHandoversCount] = useState(0);
 
   // Live clock in Asia/Pontianak & push notification check
   useEffect(() => {
@@ -79,6 +80,32 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
     return () => clearInterval(interval);
   }, [activeProfile?.id]);
+
+  // Live monitor pending handovers for the current user or admin
+  useEffect(() => {
+    const fetchPendingHandovers = async () => {
+      try {
+        const hoList = await dataService.getHandovers();
+        const pending = hoList.filter(
+          (h) => h.status === 'pending' && (isAdmin || h.receiver_profile_id === activeProfile?.id)
+        );
+        setPendingHandoversCount(pending.length);
+      } catch (e) {
+        console.warn('Error fetching pending handovers for layout:', e);
+      }
+    };
+    fetchPendingHandovers();
+    const interval = setInterval(fetchPendingHandovers, 8000);
+    const unsub = dataService.subscribe((ev) => {
+      if (ev.table === 'handovers' || ev.table === 'ALL') {
+        fetchPendingHandovers();
+      }
+    });
+    return () => {
+      clearInterval(interval);
+      unsub();
+    };
+  }, [activeProfile?.id, isAdmin]);
 
   const navItems = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -158,6 +185,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   }`}
                 />
                 <span className="truncate">{item.label}</span>
+                {item.to === '/serah-terima' && pendingHandoversCount > 0 && (
+                  <span className="ml-auto bg-amber-500 text-slate-950 font-black text-[10px] px-1.5 py-0.2 rounded-full shadow-xs animate-pulse">
+                    {pendingHandoversCount}
+                  </span>
+                )}
                 {item.adminOnly && (
                   <span className="ml-auto text-[9px] uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1 py-0.2 rounded font-mono">
                     Admin
@@ -449,10 +481,17 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                       navigate('/serah-terima');
                       setMobileDrawerOpen(false);
                     }}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-left transition"
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-left transition"
                   >
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span className="font-semibold text-slate-200 text-xs">Serah Terima</span>
+                    <div className="flex items-center gap-2.5">
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="font-semibold text-slate-200 text-xs">Serah Terima</span>
+                    </div>
+                    {pendingHandoversCount > 0 && (
+                      <span className="bg-amber-500 text-slate-950 font-black text-[10px] px-1.5 py-0.2 rounded-full shadow-xs animate-pulse">
+                        {pendingHandoversCount}
+                      </span>
+                    )}
                   </button>
                   <button
                     onClick={() => {

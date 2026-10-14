@@ -54,8 +54,15 @@ A digital platform designed for managing staff shift schedules and automating th
 - **profiles**: id, full_name, role, is_active.
 - **shifts**: id, name, start_time, end_time, color_code.
 - **shift_assignments**: id, shift_id, profile_id, shift_date, status.
-- **handovers**: id, shift_date, shift_id, from_user_id, to_user_id, status (draft/pending/received).
-- **handover_categories**: id, name, order.
-- **handover_items**: id, handover_id, category_id, summary, status.
-- **pending_tasks**: id, description, priority, status, assigned_to.
+- **handovers**: id, shift_date, shift_from_id, shift_to_id, giver_profile_id, receiver_profile_id, status (draft/pending/received/revision_needed), total_patients, categories_data, lab_conditions, pending_tasks, status_logs.
+- **handover_categories**: id, name, order, is_active.
+- **pending_tasks**: id, handover_id, task_type, description, priority, status, assigned_to.
 - **audit_logs**: id, user_id, action, target_table, target_id, changes.
+
+## 5. Handover (Operan Shift) & History Implementation Status
+- **Persistent Handover Data**: Seeded initial handovers and fortified `dataService.ts` against empty overwrites. Handover submissions now reliably persist to both localStorage cache and Supabase with full metadata (`created_at`, `updated_at`, `pending_tasks`, and audit trails).
+- **Tabbed Interface in Serah Terima**:
+  1. **Operan Masuk**: Highlights pending handovers for the receiving officer with full details (patients count, equipment warnings, critical cito tasks) and one-click "Konfirmasi Diterima" / "Minta Revisi".
+  2. **Formulir Serah Terima**: Multi-category input with instant submission feedback dialog and URL tracking.
+  3. **Data & Riwayat Operan**: Embedded searchable archive of all past handovers with filter and PDF export capabilities.
+- **Notifications & Badges**: Realtime counter badges in the desktop sidebar, mobile drawer, and NotificationBell to notify the receiving officer immediately upon handover submission.

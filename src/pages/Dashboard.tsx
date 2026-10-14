@@ -22,6 +22,12 @@ import {
   RefreshCw,
   User,
   Settings,
+  TrendingUp,
+  BarChart3,
+  CheckCircle2,
+  FileSpreadsheet,
+  Filter,
+  ArrowUpRight,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString, getPontianakTimeString } from '../services/dataService';
@@ -36,6 +42,11 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Legend,
+  AreaChart,
+  Area,
+  Line,
+  ComposedChart,
 } from 'recharts';
 
 export default function Dashboard() {
@@ -54,6 +65,10 @@ export default function Dashboard() {
   const [contactAdminModal, setContactAdminModal] = useState(false);
   const [allHandovers, setAllHandovers] = useState<Handover[]>([]);
   const [allCategories, setAllCategories] = useState<HandoverCategory[]>([]);
+
+  // Chart configuration state
+  const [chartYearFilter, setChartYearFilter] = useState<'all' | '2026' | '2025'>('2026');
+  const [chartMetricView, setChartMetricView] = useState<'composed' | 'status' | 'shifts' | 'patients'>('composed');
 
   const categoryChartData = React.useMemo(() => {
     const completedHandovers = allHandovers.filter((h) => h.status === 'received');
@@ -79,27 +94,105 @@ export default function Dashboard() {
     return Object.values(map).filter((item) => item.totalPatients > 0 || item.count > 0);
   }, [allHandovers, allCategories]);
 
+  // Comprehensive monthly handover statistics
   const monthlyChartData = React.useMemo(() => {
-    const completedHandovers = allHandovers.filter((h) => h.status === 'received');
-    const map: Record<string, { month: string; totalHandovers: number; totalPatients: number }> = {};
+    const monthNames = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const shortMonthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
 
-    completedHandovers.forEach((ho) => {
+    const filtered = allHandovers.filter((ho) => {
+      const dateStr = ho.shift_date || ho.created_at?.slice(0, 10) || '2026-01-01';
+      if (chartYearFilter === 'all') return true;
+      return dateStr.startsWith(chartYearFilter);
+    });
+
+    const map: Record<
+      string,
+      {
+        monthKey: string;
+        month: string;
+        monthFull: string;
+        totalHandovers: number;
+        receivedCount: number;
+        pendingCount: number;
+        pagiCount: number;
+        siangCount: number;
+        malamCount: number;
+        totalPatients: number;
+        avgPatients: number;
+        completionRate: number;
+      }
+    > = {};
+
+    filtered.forEach((ho) => {
       const dateStr = ho.shift_date || ho.created_at?.slice(0, 10) || '2026-01-01';
       const monthKey = dateStr.slice(0, 7); // YYYY-MM
       if (!map[monthKey]) {
         const [y, m] = monthKey.split('-');
-        const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
-        const monthName = monthNames[parseInt(m, 10)] || m;
-        map[monthKey] = { month: `${monthName} ${y}`, totalHandovers: 0, totalPatients: 0 };
+        const mNum = parseInt(m, 10);
+        const shortName = shortMonthNames[mNum] || m;
+        const fullName = monthNames[mNum] || m;
+        map[monthKey] = {
+          monthKey,
+          month: `${shortName} '${y.slice(2)}`,
+          monthFull: `${fullName} ${y}`,
+          totalHandovers: 0,
+          receivedCount: 0,
+          pendingCount: 0,
+          pagiCount: 0,
+          siangCount: 0,
+          malamCount: 0,
+          totalPatients: 0,
+          avgPatients: 0,
+          completionRate: 0,
+        };
       }
+
       map[monthKey].totalHandovers += 1;
+      if (ho.status === 'received') {
+        map[monthKey].receivedCount += 1;
+      } else {
+        map[monthKey].pendingCount += 1;
+      }
+
+      const shiftFromCode = ho.shift_from?.code || (ho.shift_from_id === 'shift-pagi' ? 'PAGI' : ho.shift_from_id === 'shift-siang' ? 'SIANG' : 'MALAM');
+      if (shiftFromCode === 'PAGI') map[monthKey].pagiCount += 1;
+      else if (shiftFromCode === 'SIANG') map[monthKey].siangCount += 1;
+      else map[monthKey].malamCount += 1;
+
       map[monthKey].totalPatients += Number(ho.total_patients) || 0;
     });
 
-    return Object.keys(map)
+    const result = Object.keys(map)
       .sort()
-      .map((key) => map[key]);
-  }, [allHandovers]);
+      .map((key) => {
+        const item = map[key];
+        item.avgPatients = item.totalHandovers > 0 ? Math.round(item.totalPatients / item.totalHandovers) : 0;
+        item.completionRate = item.totalHandovers > 0 ? Math.round((item.receivedCount / item.totalHandovers) * 100) : 0;
+        return item;
+      });
+
+    return result;
+  }, [allHandovers, chartYearFilter]);
+
+  // Overall KPI statistics from monthly handovers
+  const overallMonthlyStats = React.useMemo(() => {
+    const totalHo = monthlyChartData.reduce((acc, m) => acc + m.totalHandovers, 0);
+    const totalRec = monthlyChartData.reduce((acc, m) => acc + m.receivedCount, 0);
+    const totalPen = monthlyChartData.reduce((acc, m) => acc + m.pendingCount, 0);
+    const totalPat = monthlyChartData.reduce((acc, m) => acc + m.totalPatients, 0);
+    const avgPat = totalHo > 0 ? (totalPat / totalHo).toFixed(1) : '0';
+    const completionPercent = totalHo > 0 ? Math.round((totalRec / totalHo) * 100) : 0;
+
+    return {
+      totalHo,
+      totalRec,
+      totalPen,
+      totalPat,
+      avgPat,
+      completionPercent,
+      activeMonthsCount: monthlyChartData.length,
+    };
+  }, [monthlyChartData]);
 
   const [selectedMonthForStaff, setSelectedMonthForStaff] = useState(getPontianakDateString().slice(0, 7));
   const [monthlyAssignments, setMonthlyAssignments] = useState<ShiftAssignment[]>([]);
@@ -610,11 +703,420 @@ export default function Dashboard() {
       </div>
 
       {/* =========================================================================
-          DATA VISUALIZATION CHARTS (RECHARTS)
+          DASHBOARD VISUAL: STATISTIK JUMLAH SERAH TERIMA SHIFT PER BULAN (RECHARTS)
       ========================================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Chart 1: Completed Handovers per Category */}
-        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-sm">
+      <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200/90 shadow-sm space-y-6">
+        {/* Header & Interactive Controls */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-4 border-b border-slate-100 gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+              <BarChart3 className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+                  Statistik Jumlah Serah Terima Shift per Bulan
+                </h3>
+                <span className="text-[10px] font-mono font-semibold bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded-full">
+                  Recharts Visual
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Dashboard visual pemantauan frekuensi operan shift jaga, status verifikasi, beban pasien, dan tren bulanan
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* View Mode Toggle Buttons */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
+              <button
+                type="button"
+                onClick={() => setChartMetricView('composed')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  chartMetricView === 'composed'
+                    ? 'bg-white text-teal-800 shadow-xs font-bold'
+                    : 'hover:text-slate-900'
+                }`}
+              >
+                Gabungan &amp; Pasien
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartMetricView('status')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  chartMetricView === 'status'
+                    ? 'bg-white text-teal-800 shadow-xs font-bold'
+                    : 'hover:text-slate-900'
+                }`}
+              >
+                Status Penerimaan
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartMetricView('shifts')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  chartMetricView === 'shifts'
+                    ? 'bg-white text-teal-800 shadow-xs font-bold'
+                    : 'hover:text-slate-900'
+                }`}
+              >
+                Distribusi Shift
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartMetricView('patients')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  chartMetricView === 'patients'
+                    ? 'bg-white text-teal-800 shadow-xs font-bold'
+                    : 'hover:text-slate-900'
+                }`}
+              >
+                Tren Pasien
+              </button>
+            </div>
+
+            {/* Year Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700">
+              <Calendar className="w-3.5 h-3.5 text-slate-500" />
+              <select
+                value={chartYearFilter}
+                onChange={(e) => setChartYearFilter(e.target.value as any)}
+                className="bg-transparent font-medium focus:outline-none cursor-pointer"
+              >
+                <option value="2026">Tahun 2026</option>
+                <option value="2025">Tahun 2025</option>
+                <option value="all">Semua Tahun</option>
+              </select>
+            </div>
+
+            <button
+              onClick={() => navigate('/serah-terima')}
+              className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl transition-colors shadow-xs"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>Input Operan</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 4 Summary KPI Metric Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+          <div className="bg-gradient-to-br from-teal-50 to-emerald-50/50 p-4 rounded-xl border border-teal-100">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-teal-800">Total Serah Terima</span>
+              <FileSpreadsheet className="w-4 h-4 text-teal-600" />
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-slate-900 font-mono">{overallMonthlyStats.totalHo}</span>
+              <span className="text-xs text-teal-700 font-medium">dokumen</span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Tercatat di {overallMonthlyStats.activeMonthsCount} periode bulan
+            </p>
+          </div>
+
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 p-4 rounded-xl border border-emerald-100">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-emerald-800">Diterima Resmi</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-emerald-700 font-mono">{overallMonthlyStats.totalRec}</span>
+              <span className="text-xs text-emerald-600 font-medium font-mono">({overallMonthlyStats.completionPercent}%)</span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Tervalidasi &amp; disetujui petugas jaga
+            </p>
+          </div>
+
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50/50 p-4 rounded-xl border border-amber-100">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-amber-800">Menunggu Penerimaan</span>
+              <Clock className="w-4 h-4 text-amber-600" />
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-amber-700 font-mono">{overallMonthlyStats.totalPen}</span>
+              <span className="text-xs text-amber-600 font-medium">pending</span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              {overallMonthlyStats.totalPen > 0 ? 'Perlu konfirmasi di menu operan' : 'Semua serah terima telah diterima'}
+            </p>
+          </div>
+
+          <div className="bg-gradient-to-br from-indigo-50 to-blue-50/50 p-4 rounded-xl border border-indigo-100">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-indigo-800">Total Pasien Terlayani</span>
+              <TrendingUp className="w-4 h-4 text-indigo-600" />
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-indigo-900 font-mono">{overallMonthlyStats.totalPat}</span>
+              <span className="text-xs text-indigo-600 font-medium">pasien</span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Rata-rata ~{overallMonthlyStats.avgPat} pasien per serah terima
+            </p>
+          </div>
+        </div>
+
+        {/* Recharts Chart Canvas with Active Mode */}
+        <div className="bg-slate-50/70 p-4 sm:p-5 rounded-2xl border border-slate-200/80">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-teal-500 animate-pulse" />
+              <p className="text-xs font-bold text-slate-800">
+                {chartMetricView === 'composed' && 'Grafik Batang Jumlah Serah Terima (Diterima vs Pending) & Garis Tren Pasien per Bulan'}
+                {chartMetricView === 'status' && 'Grafik Batang Bertingkat Status Serah Terima per Bulan (Diterima vs Menunggu)'}
+                {chartMetricView === 'shifts' && 'Distribusi Jumlah Serah Terima per Bulan Berdasarkan Shift Asal (Pagi / Siang / Malam)'}
+                {chartMetricView === 'patients' && 'Grafik Area Tren Akumulasi Beban Pasien Pemeriksaan Laboratorium per Bulan'}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
+              {chartMetricView === 'composed' && (
+                <>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="w-3 h-3 rounded-xs bg-teal-600 inline-block" /> Diterima
+                  </span>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="w-3 h-3 rounded-xs bg-amber-500 inline-block" /> Menunggu
+                  </span>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="w-3 h-1.5 rounded-full bg-indigo-600 inline-block" /> Pasien
+                  </span>
+                </>
+              )}
+              {chartMetricView === 'status' && (
+                <>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="w-3 h-3 rounded-xs bg-teal-600 inline-block" /> Diterima Resmi
+                  </span>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="w-3 h-3 rounded-xs bg-amber-500 inline-block" /> Menunggu Konfirmasi
+                  </span>
+                </>
+              )}
+              {chartMetricView === 'shifts' && (
+                <>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="w-3 h-3 rounded-xs bg-sky-600 inline-block" /> Shift Pagi
+                  </span>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="w-3 h-3 rounded-xs bg-amber-600 inline-block" /> Shift Siang
+                  </span>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="w-3 h-3 rounded-xs bg-indigo-600 inline-block" /> Shift Malam
+                  </span>
+                </>
+              )}
+              {chartMetricView === 'patients' && (
+                <span className="flex items-center gap-1.5 font-medium">
+                  <span className="w-3 h-3 rounded-xs bg-indigo-600 inline-block" /> Beban Pasien Terlayani
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="h-80 w-full">
+            {monthlyChartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                {chartMetricView === 'composed' ? (
+                  <ComposedChart data={monthlyChartData} margin={{ top: 15, right: 20, left: -10, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#475569', fontWeight: 600 }} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#6366f1' }} />
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const d = payload[0].payload;
+                          return (
+                            <div className="bg-slate-900 text-white p-3 rounded-xl border border-slate-700 shadow-xl text-xs space-y-1.5 min-w-[210px]">
+                              <p className="font-bold text-slate-100 border-b border-slate-800 pb-1 flex items-center justify-between">
+                                <span>{d.monthFull}</span>
+                                <span className="font-mono text-teal-400 font-bold">{d.totalHandovers} Serah Terima</span>
+                              </p>
+                              <div className="space-y-1 pt-0.5 text-[11px]">
+                                <div className="flex justify-between items-center text-emerald-400">
+                                  <span>Diterima Resmi:</span>
+                                  <span className="font-mono font-bold">{d.receivedCount} ({d.completionRate}%)</span>
+                                </div>
+                                <div className="flex justify-between items-center text-amber-400">
+                                  <span>Menunggu Penerimaan:</span>
+                                  <span className="font-mono font-bold">{d.pendingCount}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-sky-300">
+                                  <span>Shift (Pagi/Siang/Malam):</span>
+                                  <span className="font-mono">{d.pagiCount} / {d.siangCount} / {d.malamCount}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-indigo-300 pt-1 border-t border-slate-800 font-semibold">
+                                  <span>Total Pasien:</span>
+                                  <span className="font-mono font-bold">{d.totalPatients} pasien (~{d.avgPatients}/shift)</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                    <Bar yAxisId="left" dataKey="receivedCount" name="Diterima Resmi" stackId="ho" fill="#0d9488" radius={[0, 0, 0, 0]} />
+                    <Bar yAxisId="left" dataKey="pendingCount" name="Menunggu Konfirmasi" stackId="ho" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                    <Line yAxisId="right" type="monotone" dataKey="totalPatients" name="Total Pasien" stroke="#6366f1" strokeWidth={3} dot={{ r: 4, fill: '#6366f1' }} activeDot={{ r: 6 }} />
+                  </ComposedChart>
+                ) : chartMetricView === 'status' ? (
+                  <BarChart data={monthlyChartData} margin={{ top: 15, right: 20, left: -10, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#475569', fontWeight: 600 }} />
+                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', color: '#fff', fontSize: '12px' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                    <Bar dataKey="receivedCount" name="Diterima Resmi" stackId="status" fill="#0d9488" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="pendingCount" name="Menunggu Konfirmasi" stackId="status" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                ) : chartMetricView === 'shifts' ? (
+                  <BarChart data={monthlyChartData} margin={{ top: 15, right: 20, left: -10, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#475569', fontWeight: 600 }} />
+                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', color: '#fff', fontSize: '12px' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                    <Bar dataKey="pagiCount" name="Shift Pagi" fill="#0284c7" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="siangCount" name="Shift Siang" fill="#d97706" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="malamCount" name="Shift Malam" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                ) : (
+                  <AreaChart data={monthlyChartData} margin={{ top: 15, right: 20, left: -10, bottom: 20 }}>
+                    <defs>
+                      <linearGradient id="colorPatients" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.8} />
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#475569', fontWeight: 600 }} />
+                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', color: '#fff', fontSize: '12px' }}
+                    />
+                    <Area type="monotone" dataKey="totalPatients" name="Total Pasien Terlayani" stroke="#4f46e5" fillOpacity={1} fill="url(#colorPatients)" />
+                  </AreaChart>
+                )}
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs">
+                <Calendar className="w-8 h-8 text-slate-300 mb-2" />
+                <p>Belum ada data serah terima shift pada periode {chartYearFilter === 'all' ? 'ini' : chartYearFilter}.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Detailed Monthly Breakdown Table */}
+        <div className="border border-slate-200/90 rounded-xl overflow-hidden">
+          <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <FileSpreadsheet className="w-4 h-4 text-teal-600" />
+              Tabel Rekapitulasi Serah Terima Shift per Bulan ({chartYearFilter === 'all' ? 'Semua Periode' : chartYearFilter})
+            </h4>
+            <span className="text-[11px] text-slate-500">
+              Total <strong className="text-slate-800">{monthlyChartData.length}</strong> bulan aktif tercatat
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="bg-slate-100/70 text-slate-600 font-semibold border-b border-slate-200">
+                  <th className="py-2.5 px-3">Bulan</th>
+                  <th className="py-2.5 px-3 text-center">Jumlah Operan</th>
+                  <th className="py-2.5 px-3 text-center">Diterima Resmi</th>
+                  <th className="py-2.5 px-3 text-center">Menunggu</th>
+                  <th className="py-2.5 px-3 text-center">Shift (P / S / M)</th>
+                  <th className="py-2.5 px-3 text-center">Beban Pasien</th>
+                  <th className="py-2.5 px-3 text-center">Rata-rata/Shift</th>
+                  <th className="py-2.5 px-3 text-center">Tingkat Sukses</th>
+                  <th className="py-2.5 px-3 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-mono">
+                {monthlyChartData.length > 0 ? (
+                  monthlyChartData.map((row, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-2.5 px-3 font-sans font-bold text-slate-800">{row.monthFull}</td>
+                      <td className="py-2.5 px-3 text-center font-bold text-teal-700 bg-teal-50/40">
+                        {row.totalHandovers}
+                      </td>
+                      <td className="py-2.5 px-3 text-center text-emerald-700">
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold">
+                          {row.receivedCount}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center text-amber-700">
+                        {row.pendingCount > 0 ? (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-bold">
+                            {row.pendingCount}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-sans text-[11px]">-</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-center text-slate-600 text-[11px]">
+                        <span className="text-sky-700">{row.pagiCount}</span> /{' '}
+                        <span className="text-amber-700">{row.siangCount}</span> /{' '}
+                        <span className="text-indigo-700">{row.malamCount}</span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-bold text-slate-800">
+                        {row.totalPatients} <span className="font-sans text-[10px] text-slate-500 font-normal">org</span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center text-slate-600 text-[11px]">
+                        ~{row.avgPatients} <span className="font-sans text-[10px] text-slate-400">pasien</span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-sans">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <div className="w-16 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className="bg-emerald-500 h-1.5 rounded-full"
+                              style={{ width: `${row.completionRate}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-mono font-bold text-slate-700">{row.completionRate}%</span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-sans">
+                        <button
+                          type="button"
+                          onClick={() => navigate('/riwayat')}
+                          className="text-[11px] font-bold text-teal-700 hover:text-teal-900 inline-flex items-center gap-0.5 hover:underline"
+                        >
+                          <span>Arsip</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={9} className="py-6 text-center text-slate-400 text-xs font-sans">
+                      Tidak ada data serah terima shift pada filter tahun ini.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          STATISTIK KATEGORI PEMERIKSAAN PASIEN
+      ========================================================================= */}
+      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-sm">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
             <div>
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -658,46 +1160,6 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-
-        {/* Chart 2: Completed Handovers per Month */}
-        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-sm">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-blue-600" />
-                Ringkasan Serah Terima Selesai per Bulan
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Frekuensi serah terima jaga terselesaikan setiap bulannya
-              </p>
-            </div>
-            <span className="text-[10px] font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-200">
-              {monthlyChartData.length} Bulan Aktif
-            </span>
-          </div>
-
-          <div className="h-72 w-full">
-            {monthlyChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyChartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', color: '#fff', fontSize: '12px' }}
-                  />
-                  <Bar dataKey="totalHandovers" name="Jumlah Serah Terima" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs">
-                <Calendar className="w-8 h-8 text-slate-300 mb-2" />
-                <p>Belum ada arsip bulanan serah terima jaga.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
 
       {/* =========================================================================
           STATISTIK TOTAL SHIFT PER PETUGAS (BULANAN)
