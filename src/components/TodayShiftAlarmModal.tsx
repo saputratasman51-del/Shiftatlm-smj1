@@ -87,10 +87,18 @@ export function TodayShiftAlarmModal() {
   const checkTodayStatus = async () => {
     try {
       setLoading(true);
-      const [assignments, shifts] = await Promise.all([
+      // Calculate yesterday date
+      const todayDate = new Date(todayStr);
+      const yesterdayDate = new Date(todayDate);
+      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+      const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
+
+      const [assignmentsToday, assignmentsYesterday, shifts] = await Promise.all([
         dataService.getAssignments({ date: todayStr }),
+        dataService.getAssignments({ date: yesterdayStr }),
         dataService.getShifts(),
       ]);
+      const assignments = [...assignmentsToday, ...assignmentsYesterday];
 
       const [curH, curM] = getPontianakTimeString().split(':').map(Number);
       const curMinutes = curH * 60 + (curM || 0);
@@ -101,9 +109,18 @@ export function TodayShiftAlarmModal() {
 
       // Staff currently on duty for the active shift
       if (operatingShift) {
-        const onDuty = assignments.filter(
-          (a) => a.shift_id === operatingShift.id && a.status !== 'cancelled'
-        );
+        const onDuty = assignments.filter((a) => {
+          if (a.shift_id !== operatingShift.id || a.status === 'cancelled') return false;
+          
+          const [sh] = operatingShift.start_time.split(':').map(Number);
+          // If shift is overnight (starts 21:00), and current time is 01:00, 
+          // the assignment date must be yesterday.
+          const isOvernight = sh >= 18; // Assuming 18:00+ starts overnight
+          const [curH] = getPontianakTimeString().split(':').map(Number);
+          
+          const expectedDate = (isOvernight && curH < 12) ? yesterdayStr : todayStr;
+          return a.shift_date === expectedDate;
+        });
         setCurrentDutyStaff(onDuty);
       }
 
