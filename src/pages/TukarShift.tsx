@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString } from '../services/dataService';
-import { ShiftSwap, UserProfile, Shift } from '../types';
+import { ShiftSwap, UserProfile, Shift, ShiftAssignment } from '../types';
 import { useToast } from '../components/Toast';
 import { SwapReminderBanner } from '../components/SwapReminderBanner';
 import { playAlarmSound } from '../utils/alarmSound';
@@ -42,10 +42,12 @@ export default function TukarShift() {
   const [swaps, setSwaps] = useState<ShiftSwap[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
+  const [allAssignments, setAllAssignments] = useState<ShiftAssignment[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
+  const [isManualShiftOverride, setIsManualShiftOverride] = useState(false);
   const [filterTab, setFilterTab] = useState<'all' | 'reminders' | 'pending' | 'approved'>('all');
   const [formData, setFormData] = useState({
     shift_date: getPontianakDateString(),
@@ -57,17 +59,17 @@ export default function TukarShift() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [allSwaps, allProfiles, allShifts] = await Promise.all([
+      const [allSwaps, allProfiles, allShifts, assignmentsData] = await Promise.all([
         dataService.getShiftSwaps(),
         dataService.getProfiles(),
         dataService.getShifts(),
+        dataService.getAssignments(),
       ]);
       setSwaps(allSwaps);
       setProfiles(allProfiles);
       setShifts(allShifts);
-      if (allShifts.length > 0 && !formData.shift_id) {
-        setFormData((prev) => ({ ...prev, shift_id: allShifts[0].id }));
-      }
+      setAllAssignments(assignmentsData);
+
       const otherProfiles = allProfiles.filter((p) => p.id !== activeProfile.id);
       if (otherProfiles.length > 0 && !formData.target_profile_id) {
         setFormData((prev) => ({ ...prev, target_profile_id: otherProfiles[0].id }));
@@ -78,6 +80,29 @@ export default function TukarShift() {
       setLoading(false);
     }
   };
+
+  // Scheduled assignments for the logged-in officer
+  const myAssignments = React.useMemo(() => {
+    return allAssignments
+      .filter((a) => a.profile_id === activeProfile.id && a.status !== 'cancelled')
+      .sort((a, b) => a.shift_date.localeCompare(b.shift_date));
+  }, [allAssignments, activeProfile.id]);
+
+  // Detected shift on the selected date for the requesting officer
+  const currentDetectedAssignment = React.useMemo(() => {
+    return myAssignments.find((a) => a.shift_date === formData.shift_date);
+  }, [myAssignments, formData.shift_date]);
+
+  // Colleague schedule on the selected date
+  const selectedColleagueAssignment = React.useMemo(() => {
+    if (!formData.target_profile_id || !formData.shift_date) return null;
+    return allAssignments.find(
+      (a) =>
+        a.profile_id === formData.target_profile_id &&
+        a.shift_date === formData.shift_date &&
+        a.status !== 'cancelled'
+    );
+  }, [allAssignments, formData.target_profile_id, formData.shift_date]);
 
   useEffect(() => {
     loadData();
@@ -102,13 +127,45 @@ export default function TukarShift() {
 
   const handleOpenModal = () => {
     const otherProfiles = profiles.filter((p) => p.id !== activeProfile.id);
+    const today = getPontianakDateString();
+
+    // Look for upcoming assignments for active user
+    const upcomingAssignments = myAssignments.filter((a) => a.shift_date >= today);
+
+    let initialDate = today;
+    let initialShiftId = shifts[0]?.id || '';
+
+    if (upcomingAssignments.length > 0) {
+      initialDate = upcomingAssignments[0].shift_date;
+      initialShiftId = upcomingAssignments[0].shift_id;
+    } else if (myAssignments.length > 0) {
+      // If all assignments are in the past, pick the latest one
+      const sorted = [...myAssignments].sort((a, b) => b.shift_date.localeCompare(a.shift_date));
+      initialDate = sorted[0].shift_date;
+      initialShiftId = sorted[0].shift_id;
+    } else {
+      const todayAssigned = myAssignments.find((a) => a.shift_date === today);
+      if (todayAssigned) initialShiftId = todayAssigned.shift_id;
+    }
+
     setFormData({
-      shift_date: getPontianakDateString(),
-      shift_id: shifts[0]?.id || '',
+      shift_date: initialDate,
+      shift_id: initialShiftId,
       target_profile_id: otherProfiles[0]?.id || '',
       reason: '',
     });
+    setIsManualShiftOverride(false);
     setModalOpen(true);
+  };
+
+  const handleDateChange = (newDate: string) => {
+    const assigned = myAssignments.find((a) => a.shift_date === newDate);
+    setFormData((prev) => ({
+      ...prev,
+      shift_date: newDate,
+      shift_id: assigned ? assigned.shift_id : (prev.shift_id || shifts[0]?.id || ''),
+    }));
+    setIsManualShiftOverride(false);
   };
 
   const handleCreateSwap = async (e: React.FormEvent) => {
@@ -584,67 +641,244 @@ export default function TukarShift() {
               </button>
             </div>
 
-            <form onSubmit={handleCreateSwap} className="mt-4 space-y-3.5 text-xs">
+            <form onSubmit={handleCreateSwap} className="mt-4 space-y-4 text-xs">
+              {/* Petugas Pemohon Info */}
+              <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="w-8 h-8 rounded-lg bg-teal-600 text-white font-bold flex items-center justify-center shrink-0 text-xs">
+                  {activeProfile.full_name.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-800 truncate">{activeProfile.full_name}</p>
+                  <p className="text-[10px] text-slate-500 truncate">{activeProfile.position || 'Petugas ATLM'}</p>
+                </div>
+                <span className="text-[10px] font-semibold bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full border border-teal-200">
+                  Pemohon
+                </span>
+              </div>
+
+              {/* 1. Tanggal Shift Yang Ditukar */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Tanggal Shift Yang Ditukar</label>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Tanggal Shift Yang Ditukar
+                </label>
                 <input
                   type="date"
                   required
                   value={formData.shift_date}
-                  onChange={(e) => setFormData({ ...formData, shift_date: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono font-semibold"
+                  onChange={(e) => handleDateChange(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-800 text-xs focus:ring-2 focus:ring-teal-500/20 focus:outline-none"
                 />
+
+                {/* Quick Date Chips from Officer's Scheduled Shifts */}
+                {myAssignments.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-[10px] text-slate-500 font-semibold flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-teal-600" />
+                      <span>Jadwal dinas Anda (klik untuk pilih cepat):</span>
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-0.5">
+                      {myAssignments.map((a) => {
+                        const isSelected = a.shift_date === formData.shift_date;
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => handleDateChange(a.shift_date)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-all flex items-center gap-1 ${
+                              isSelected
+                                ? 'bg-teal-600 text-white shadow-xs font-bold ring-1 ring-teal-500'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80'
+                            }`}
+                          >
+                            <span className="font-mono">{a.shift_date}</span>
+                            <span>({a.shift?.name || 'Shift'})</span>
+                            {isSelected && <CheckCircle2 className="w-2.5 h-2.5 text-white" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
+              {/* 2. Jenis Shift Asli Petugas (Otomatis Terbaca) */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Jenis Shift Asli</label>
-                <select
-                  required
-                  value={formData.shift_id}
-                  onChange={(e) => setFormData({ ...formData, shift_id: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                >
-                  {shifts.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.start_time.slice(0, 5)} - {s.end_time.slice(0, 5)} WIB)
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700">
+                    Jenis Shift Asli Petugas
+                  </label>
+                  {currentDetectedAssignment && !isManualShiftOverride && (
+                    <button
+                      type="button"
+                      onClick={() => setIsManualShiftOverride(true)}
+                      className="text-[10px] font-semibold text-slate-500 hover:text-slate-800 underline"
+                    >
+                      Pilih shift manual
+                    </button>
+                  )}
+                </div>
+
+                {currentDetectedAssignment && !isManualShiftOverride ? (
+                  /* Auto-detected Shift Display Card */
+                  <div className="p-3 bg-gradient-to-br from-teal-50 to-emerald-50/80 border border-teal-200/90 rounded-xl space-y-1.5 animate-fade-in shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-teal-800">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Otomatis Terdeteksi dari Jadwal Anda</span>
+                      </span>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-300">
+                        {currentDetectedAssignment.shift?.code || shifts.find((s) => s.id === formData.shift_id)?.code || 'SHIFT'}
+                      </span>
+                    </div>
+
+                    <div className="pt-1 flex items-baseline justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">
+                          {currentDetectedAssignment.shift?.name || shifts.find((s) => s.id === formData.shift_id)?.name}
+                        </p>
+                        <p className="text-xs text-slate-600 flex items-center gap-1 font-medium mt-0.5">
+                          <Clock className="w-3.5 h-3.5 text-teal-600" />
+                          <span>
+                            {currentDetectedAssignment.shift?.start_time.slice(0, 5) || '07:00'} -{' '}
+                            {currentDetectedAssignment.shift?.end_time.slice(0, 5) || '14:00'} WIB
+                          </span>
+                        </p>
+                      </div>
+
+                      {currentDetectedAssignment.notes && (
+                        <div className="text-right">
+                          <span className="text-[10px] text-teal-800 bg-white/90 px-2 py-0.5 rounded-md border border-teal-200 inline-block font-medium">
+                            {currentDetectedAssignment.notes}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="text-[10px] text-teal-700/90 pt-1.5 border-t border-teal-200/60">
+                      Sistem membaca dinas asli Anda pada tanggal ini. Anda cukup memilih rekan pengganti dan mengisi alasan pertukaran di bawah.
+                    </p>
+                  </div>
+                ) : (
+                  /* Fallback or Manual Select */
+                  <div className="space-y-1.5">
+                    {!currentDetectedAssignment && (
+                      <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2 text-[11px] text-amber-800">
+                        <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold">Tidak Ditemukan Jadwal Dinas pada Tanggal Ini</p>
+                          <p className="text-[10px] text-amber-700 mt-0.5">
+                            Anda tidak memiliki jadwal dinas aktif pada tanggal {formData.shift_date}. Silakan pilih jenis shift asli secara manual atau gunakan tombol pilih tanggal di atas.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <select
+                      required
+                      value={formData.shift_id}
+                      onChange={(e) => setFormData({ ...formData, shift_id: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-xs text-slate-800 focus:ring-2 focus:ring-teal-500/20 focus:outline-none"
+                    >
+                      {shifts.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.start_time.slice(0, 5)} - {s.end_time.slice(0, 5)} WIB)
+                        </option>
+                      ))}
+                    </select>
+
+                    {isManualShiftOverride && currentDetectedAssignment && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsManualShiftOverride(false);
+                          setFormData((prev) => ({ ...prev, shift_id: currentDetectedAssignment.shift_id }));
+                        }}
+                        className="text-[10px] font-semibold text-teal-700 hover:text-teal-900 flex items-center gap-1 mt-1"
+                      >
+                        <span>&larr; Kembalikan ke shift otomatis ({currentDetectedAssignment.shift?.name})</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
+              {/* 3. Pilih Rekan Pengganti (Target) */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Pilih Rekan Pengganti (Target)</label>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Pilih Rekan Pengganti (Target)
+                </label>
                 <select
                   required
                   value={formData.target_profile_id}
                   onChange={(e) => setFormData({ ...formData, target_profile_id: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-xs text-slate-800 focus:ring-2 focus:ring-teal-500/20 focus:outline-none"
                 >
                   {profiles
                     .filter((p) => p.id !== activeProfile.id)
                     .map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.full_name} ({p.position})
+                        {p.full_name} ({p.position || 'Petugas ATLM'})
                       </option>
                     ))}
                 </select>
+
+                {/* Colleague schedule indicator on the chosen date */}
+                {formData.target_profile_id && (
+                  <div className="mt-1.5">
+                    {selectedColleagueAssignment ? (
+                      <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200/70 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                        <Clock className="w-3 h-3 text-amber-600 shrink-0" />
+                        <span>
+                          Rekan ini memiliki jadwal <strong>{selectedColleagueAssignment.shift?.name}</strong> pada tanggal yang sama.
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200/70 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>Rekan ini bebas tugas / lepas jaga pada tanggal yang dipilih.</span>
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
+              {/* 4. Alasan Pertukaran Shift */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Alasan Pertukaran Shift</label>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Alasan Pertukaran Shift
+                </label>
+                <div className="flex flex-wrap gap-1 mb-1.5">
+                  {[
+                    'Keperluan Keluarga Mendesak',
+                    'Kondisi Kurang Sehat / Sakit',
+                    'Tugas Dinas Luar / Pelatihan',
+                    'Pertukaran Hari Jaga',
+                  ].map((quickReason) => (
+                    <button
+                      key={quickReason}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, reason: quickReason })}
+                      className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-teal-50 hover:text-teal-800 text-[10px] text-slate-600 border border-slate-200 transition-colors"
+                    >
+                      + {quickReason}
+                    </button>
+                  ))}
+                </div>
                 <textarea
                   rows={3}
-                  placeholder="Misal: Keperluan keluarga mendadak / Acara penting"
+                  required
+                  placeholder="Misal: Keperluan keluarga mendadak / Acara penting di luar kota"
                   value={formData.reason}
                   onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
                 />
               </div>
 
+              {/* Action Buttons */}
               <div className="pt-3 border-t border-slate-100 flex gap-2">
                 <button
                   type="submit"
-                  className="flex-1 bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5"
+                  className="flex-1 bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 text-xs"
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>Kirim Pengajuan</span>
@@ -652,7 +886,7 @@ export default function TukarShift() {
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors"
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors text-xs"
                 >
                   Batal
                 </button>
