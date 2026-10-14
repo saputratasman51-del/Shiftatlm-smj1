@@ -139,10 +139,18 @@ export function TodayShiftAlarmModal() {
       });
       setCurrentDinasLuarStaff(dinasLuar);
 
-      // Check current user's assignment today
-      const mine = assignments.find(
-        (a) => a.profile_id === activeProfile.id && a.status !== 'cancelled'
-      );
+      // Check current user's assignment today or yesterday for overnight shifts
+      const mine = assignments.find((a) => {
+        if (a.profile_id !== activeProfile.id || a.status === 'cancelled') return false;
+        
+        // Use the same logic to determine expected date as for onDuty staff
+        const [sh] = (a.shift?.start_time || '00:00').split(':').map(Number);
+        const isOvernight = sh >= 18;
+        const [curH] = getPontianakTimeString().split(':').map(Number);
+        const expectedDate = (isOvernight && curH < 12) ? yesterdayStr : todayStr;
+        
+        return a.shift_date === expectedDate;
+      });
       setTodayAssignment(mine || null);
 
       if (mine && mine.shift) {
