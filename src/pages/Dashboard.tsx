@@ -312,6 +312,40 @@ export default function Dashboard() {
     return () => unsubscribe();
   }, [activeProfile.id, selectedMonthForStaff]);
 
+  // Ringkasan Jadwal Harian Hari Ini (Pagi, Siang, Malam)
+  const dailyShiftSummary = React.useMemo(() => {
+    const map: Record<string, { shiftId: string; shiftName: string; colorCode: string; timeRange: string; staffList: ShiftAssignment[] }> = {};
+
+    allShifts.forEach((s) => {
+      map[s.id] = {
+        shiftId: s.id,
+        shiftName: s.name,
+        colorCode: s.color_code || '#0d9488',
+        timeRange: s.start_time && s.end_time ? `${s.start_time.slice(0, 5)} - ${s.end_time.slice(0, 5)} WIB` : '',
+        staffList: [],
+      };
+    });
+
+    todayAssignments.forEach((a) => {
+      if (a.status === 'cancelled') return;
+      const sId = a.shift_id;
+      if (!map[sId] && a.shift) {
+        map[sId] = {
+          shiftId: sId,
+          shiftName: a.shift.name,
+          colorCode: a.shift.color_code || '#0d9488',
+          timeRange: a.shift.start_time && a.shift.end_time ? `${a.shift.start_time.slice(0, 5)} - ${a.shift.end_time.slice(0, 5)} WIB` : '',
+          staffList: [],
+        };
+      }
+      if (map[sId]) {
+        map[sId].staffList.push(a);
+      }
+    });
+
+    return Object.values(map);
+  }, [todayAssignments, allShifts]);
+
   return (
     <div className="space-y-5 animate-fade-in">
       {/* =========================================================================
@@ -620,6 +654,92 @@ export default function Dashboard() {
             <span>Kelola Pekerjaan Tertunda</span>
             <ChevronRight className="w-4 h-4" />
           </button>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          RINGKASAN JADWAL HARIAN HARI INI (PAGI, SIANG, MALAM)
+      ========================================================================= */}
+      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-teal-600" />
+              Ringkasan Jadwal Harian Hari Ini
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Daftar petugas yang sedang bertugas di shift Pagi, Siang, dan Malam tanggal <span className="font-mono font-semibold text-slate-700">{todayStr}</span>
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/jadwal')}
+            className="text-xs font-semibold text-teal-700 hover:text-teal-800 flex items-center gap-1 self-start sm:self-center cursor-pointer"
+          >
+            <span>Kelola Jadwal Lengkap</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {dailyShiftSummary.length > 0 ? (
+            dailyShiftSummary.map((shiftGroup) => (
+              <div
+                key={shiftGroup.shiftId}
+                className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-200/70 flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-200/60">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-3 h-3 rounded-full shrink-0 shadow-2xs"
+                        style={{ backgroundColor: shiftGroup.colorCode }}
+                      />
+                      <span className="text-xs font-extrabold text-slate-900">{shiftGroup.shiftName}</span>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
+                      {shiftGroup.staffList.length} Petugas
+                    </span>
+                  </div>
+
+                  {shiftGroup.timeRange && (
+                    <p className="text-[10px] font-mono text-slate-500 mb-2.5 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      {shiftGroup.timeRange}
+                    </p>
+                  )}
+
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
+                    {shiftGroup.staffList.length > 0 ? (
+                      shiftGroup.staffList.map((assignment) => (
+                        <div
+                          key={assignment.id}
+                          className="flex items-center gap-2.5 p-2 rounded-lg bg-white border border-slate-200/60 shadow-2xs"
+                        >
+                          <Avatar profile={assignment.profile} size="xs" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-slate-800 truncate">
+                              {assignment.profile?.full_name || 'Petugas'}
+                            </p>
+                            <p className="text-[10px] text-slate-500 truncate">
+                              {assignment.profile?.position || 'ATLM'}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-4 text-center text-slate-400 text-xs italic">
+                        Belum ada petugas terjadwal
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="col-span-3 py-6 text-center text-slate-400 text-xs">
+              Belum ada data shift yang dikonfigurasi untuk hari ini.
+            </div>
+          )}
         </div>
       </div>
 

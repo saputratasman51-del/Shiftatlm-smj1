@@ -18,6 +18,7 @@ import {
   Wrench,
   Activity,
   X,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService } from '../services/dataService';
@@ -298,6 +299,21 @@ export default function Riwayat() {
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
+
+                  {isAdmin && (
+                    <button
+                      onClick={async () => {
+                        if (window.confirm(`Yakin ingin menghapus arsip serah terima tanggal ${ho.shift_date}?`)) {
+                          await dataService.deleteHandover(ho.id);
+                          loadData();
+                        }
+                      }}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold py-2 px-3 rounded-xl flex items-center justify-center transition-colors min-h-[40px]"
+                      title="Hapus Arsip Serah Terima"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

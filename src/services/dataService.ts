@@ -1558,6 +1558,27 @@ class DataService {
     return handover;
   }
 
+  public async deleteHandover(id: string): Promise<boolean> {
+    const all = await this.getHandovers();
+    const updated = all.filter((h) => h.id !== id);
+    this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(updated));
+
+    if (this.isSupabaseAvailable()) {
+      try {
+        const { error } = await supabase.from('handovers').delete().eq('id', id);
+        if (!error) {
+          this.updateStatus({ connected: true, lastSynced: new Date() });
+        }
+      } catch (err) {
+        console.warn('Supabase delete handover failed:', err);
+      }
+    }
+
+    this.logAudit(this.getActiveUserId(), 'DELETE_SERAH_TERIMA', 'handovers', id, {});
+    this.broadcastChange('handovers', 'DELETE', { id });
+    return true;
+  }
+
   // --- PENDING TASKS ---
   public async getPendingTasks(statusFilter?: string, forceRefresh = false): Promise<PendingTask[]> {
     let tasks: PendingTask[] = [];

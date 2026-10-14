@@ -48,6 +48,7 @@ import {
   Shift,
   UserProfile,
   HandoverStatus,
+  ShiftAssignment,
 } from '../types';
 import { useToast } from '../components/Toast';
 import { Avatar } from '../components/Avatar';
@@ -64,6 +65,7 @@ export default function SerahTerima() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [allHandovers, setAllHandovers] = useState<Handover[]>([]);
+  const [assignments, setAssignments] = useState<ShiftAssignment[]>([]);
 
   // Navigation tab: 'masuk' (Operan Masuk) | 'form' (Formulir Serah Terima) | 'riwayat' (Data & Riwayat)
   const [activeTab, setActiveTab] = useState<'masuk' | 'form' | 'riwayat'>('masuk');
@@ -84,6 +86,32 @@ export default function SerahTerima() {
   const [handoverStatus, setHandoverStatus] = useState<HandoverStatus>('draft');
   const [revisionNotes, setRevisionNotes] = useState('');
   const [statusLogs, setStatusLogs] = useState<Handover['status_logs']>([]);
+
+  // Staff assigned to shiftFromId on shiftDate (Otomatis terbaca dari jadwal)
+  const giverProfilesOnDuty = useMemo(() => {
+    if (!shiftDate || !shiftFromId) return profiles;
+    const matched = assignments.filter(
+      (a) => a.shift_date === shiftDate && a.shift_id === shiftFromId
+    );
+    const matchedProfiles = matched
+      .map((a) => a.profile || profiles.find((p) => p.id === a.profile_id))
+      .filter(Boolean) as UserProfile[];
+    if (matchedProfiles.length > 0) return matchedProfiles;
+    return profiles;
+  }, [assignments, shiftDate, shiftFromId, profiles]);
+
+  // Staff assigned to shiftToId on shiftDate (Otomatis terbaca dari jadwal)
+  const receiverProfilesOnDuty = useMemo(() => {
+    if (!shiftDate || !shiftToId) return profiles;
+    const matched = assignments.filter(
+      (a) => a.shift_date === shiftDate && a.shift_id === shiftToId
+    );
+    const matchedProfiles = matched
+      .map((a) => a.profile || profiles.find((p) => p.id === a.profile_id))
+      .filter(Boolean) as UserProfile[];
+    if (matchedProfiles.length > 0) return matchedProfiles;
+    return profiles;
+  }, [assignments, shiftDate, shiftToId, profiles]);
 
   // 2. Kategori Pemeriksaan Pasien (17 Kategori)
   const [categoryDataMap, setCategoryDataMap] = useState<Record<string, HandoverCategoryData>>({});
@@ -262,16 +290,18 @@ export default function SerahTerima() {
     const initData = async () => {
       setLoading(true);
       try {
-        const [cats, sList, pList, allHo] = await Promise.all([
+        const [cats, sList, pList, allHo, allAsg] = await Promise.all([
           dataService.getCategories(),
           dataService.getShifts(),
           dataService.getProfiles(),
           dataService.getHandovers(),
+          dataService.getAssignments(),
         ]);
         setCategories(cats);
         setShifts(sList);
         setProfiles(pList);
         setAllHandovers(allHo);
+        setAssignments(allAsg);
 
         // Default shifts
         if (sList.length >= 2) {
@@ -520,6 +550,23 @@ export default function SerahTerima() {
     } catch (e) {
       console.error('Error rejecting handover:', e);
       showToast('Gagal Mengirim Revisi', 'Terjadi kesalahan sistem', 'error');
+    }
+  };
+
+  const handleDeleteHandover = async (ho: Handover) => {
+    if (!window.confirm(`Yakin ingin menghapus dokumen/data serah terima tanggal ${ho.shift_date} (${ho.shift_from?.name} -> ${ho.shift_to?.name})?`)) {
+      return;
+    }
+    try {
+      await dataService.deleteHandover(ho.id);
+      showToast('Berhasil Dihapus', 'Dokumen serah terima telah dihapus dari sistem');
+      await refreshHandoversList();
+      if (currentHandoverId === ho.id) {
+        handleCreateNewHandover();
+      }
+    } catch (e) {
+      console.error('Error deleting handover:', e);
+      showToast('Gagal Menghapus', 'Terjadi kesalahan saat menghapus dokumen', 'error');
     }
   };
 
@@ -916,26 +963,38 @@ export default function SerahTerima() {
                         </button>
                       </div>
 
-                      {/* Receiver Actions */}
-                      {isTargetForMe && (
-                        <div className="flex items-center gap-2">
+                      {/* Receiver Actions / Admin Delete */}
+                      <div className="flex items-center gap-2">
+                        {isAdmin && (
                           <button
-                            onClick={() => setTargetRejectHandover(ho)}
+                            onClick={() => handleDeleteHandover(ho)}
                             className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2.5 px-3.5 rounded-xl transition-colors"
+                            title="Hapus Operan Masuk"
                           >
-                            <RotateCcw className="w-4 h-4 text-rose-600" />
-                            <span>Minta Revisi</span>
+                            <Trash2 className="w-4 h-4 text-rose-600" />
+                            <span>Hapus</span>
                           </button>
+                        )}
+                        {isTargetForMe && (
+                          <>
+                            <button
+                              onClick={() => setTargetRejectHandover(ho)}
+                              className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2.5 px-3.5 rounded-xl transition-colors"
+                            >
+                              <RotateCcw className="w-4 h-4 text-rose-600" />
+                              <span>Minta Revisi</span>
+                            </button>
 
-                          <button
-                            onClick={() => setTargetConfirmHandover(ho)}
-                            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all"
-                          >
-                            <Check className="w-4 h-4" />
-                            <span>Konfirmasi Diterima</span>
-                          </button>
-                        </div>
-                      )}
+                            <button
+                              onClick={() => setTargetConfirmHandover(ho)}
+                              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all"
+                            >
+                              <Check className="w-4 h-4" />
+                              <span>Konfirmasi Diterima</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -1006,6 +1065,24 @@ export default function SerahTerima() {
 
             {/* Action buttons */}
             <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+              {isAdmin && (
+                <button
+                  onClick={() => {
+                    const ho = allHandovers.find(h => h.id === currentHandoverId);
+                    if (ho) {
+                      handleDeleteHandover(ho);
+                    } else {
+                      handleCreateNewHandover();
+                      showToast('Draf Dihapus', 'Formulir draf berhasil dibersihkan');
+                    }
+                  }}
+                  className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2.5 px-3.5 rounded-xl transition-colors min-h-[44px]"
+                  title="Hapus / Reset Formulir"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  <span>Hapus Formulir</span>
+                </button>
+              )}
               {!isLocked && (
                 <>
                   <button
@@ -1151,37 +1228,67 @@ export default function SerahTerima() {
 
               {/* Petugas Yang Menyerahkan */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Petugas Yang Menyerahkan</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700">Petugas Yang Menyerahkan</label>
+                  <span className="text-[10px] font-semibold bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full">
+                    {giverProfilesOnDuty.length > 0 && assignments.some(a => a.shift_date === shiftDate && a.shift_id === shiftFromId)
+                      ? `✨ ${giverProfilesOnDuty.length} Petugas Dinas Aktif`
+                      : 'Semua Petugas'}
+                  </span>
+                </div>
                 <select
                   disabled={isLocked}
                   value={giverProfileId}
                   onChange={(e) => setGiverProfileId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold text-slate-900 text-xs sm:text-sm"
                 >
-                  {profiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.full_name} ({p.position})
-                    </option>
-                  ))}
+                  {giverProfilesOnDuty.map((p) => {
+                    const isAssigned = assignments.some(
+                      (a) => a.shift_date === shiftDate && a.shift_id === shiftFromId && a.profile_id === p.id
+                    );
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.full_name} ({p.position || 'ATLM'}) {isAssigned ? '✓ [Jadwal Shift Asal]' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Otomatis terbaca dari petugas yang terjadwal jaga pada tanggal dan shift asal terpilih.
+                </p>
               </div>
 
               {/* Petugas Yang Menerima */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Petugas Yang Menerima</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700">Petugas Yang Menerima</label>
+                  <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                    {receiverProfilesOnDuty.length > 0 && assignments.some(a => a.shift_date === shiftDate && a.shift_id === shiftToId)
+                      ? `✨ ${receiverProfilesOnDuty.length} Petugas Pengganti Aktif`
+                      : 'Semua Petugas'}
+                  </span>
+                </div>
                 <select
                   disabled={isLocked}
                   value={receiverProfileId}
                   onChange={(e) => setReceiverProfileId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold text-slate-900 text-xs sm:text-sm"
                 >
                   <option value="">-- Pilih Petugas Penerima --</option>
-                  {profiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.full_name} ({p.position})
-                    </option>
-                  ))}
+                  {receiverProfilesOnDuty.map((p) => {
+                    const isAssigned = assignments.some(
+                      (a) => a.shift_date === shiftDate && a.shift_id === shiftToId && a.profile_id === p.id
+                    );
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.full_name} ({p.position || 'ATLM'}) {isAssigned ? '✓ [Jadwal Shift Tujuan]' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Otomatis terbaca dari petugas yang terjadwal jaga pada tanggal dan shift tujuan berikutnya.
+                </p>
               </div>
 
               {/* Waktu Penerimaan */}
@@ -1786,6 +1893,16 @@ export default function SerahTerima() {
                     >
                       <Printer className="w-3.5 h-3.5" />
                     </button>
+
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleDeleteHandover(ho)}
+                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold py-2 px-3 rounded-xl flex items-center justify-center transition-colors min-h-[40px]"
+                        title="Hapus Data & Riwayat Operan"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
