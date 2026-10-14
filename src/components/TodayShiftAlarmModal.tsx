@@ -22,6 +22,7 @@ import {
   Heart,
   Sun,
   Award,
+  Building,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -39,6 +40,7 @@ export function TodayShiftAlarmModal() {
   const [shiftPartners, setShiftPartners] = useState<ShiftAssignment[]>([]);
   const [currentActiveShift, setCurrentActiveShift] = useState<Shift | null>(null);
   const [currentDutyStaff, setCurrentDutyStaff] = useState<ShiftAssignment[]>([]);
+  const [currentDinasLuarStaff, setCurrentDinasLuarStaff] = useState<ShiftAssignment[]>([]);
   const [isShiftFinished, setIsShiftFinished] = useState(false);
   const [isHoliday, setIsHoliday] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -104,6 +106,21 @@ export function TodayShiftAlarmModal() {
         );
         setCurrentDutyStaff(onDuty);
       }
+
+      // Filter dinas luar staff today
+      const dinasLuar = assignments.filter((a) => {
+        if (a.status === 'cancelled') return false;
+        const shiftName = (a.shift?.name || '').toLowerCase();
+        const shiftCode = (a.shift?.code || '').toLowerCase();
+        const notes = (a.notes || '').toLowerCase();
+        return (
+          shiftName.includes('dinas luar') ||
+          shiftCode.includes('dinas_luar') ||
+          notes.includes('dinas luar') ||
+          notes.includes('dinas luar kota')
+        );
+      });
+      setCurrentDinasLuarStaff(dinasLuar);
 
       // Check current user's assignment today
       const mine = assignments.find(
@@ -320,19 +337,21 @@ export function TodayShiftAlarmModal() {
             </button>
           )}
 
-          <button
-            onClick={() => {
-              setActiveTab('holiday');
-              playAlarmSound('holiday');
-            }}
-            className={`flex-1 py-1.5 px-2 rounded-lg transition-all text-center ${
-              activeTab === 'holiday'
-                ? 'bg-white text-slate-900 shadow-sm font-bold'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Info Libur
-          </button>
+          {isHoliday && (
+            <button
+              onClick={() => {
+                setActiveTab('holiday');
+                playAlarmSound('holiday');
+              }}
+              className={`flex-1 py-1.5 px-2 rounded-lg transition-all text-center ${
+                activeTab === 'holiday'
+                  ? 'bg-white text-slate-900 shadow-sm font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Info Libur
+            </button>
+          )}
         </div>
 
         {/* TAB 1: CURRENT DUTY (PETUGAS YANG JAGA SHIFT SEKARANG) */}
@@ -433,6 +452,59 @@ export function TodayShiftAlarmModal() {
                 </div>
               )}
             </div>
+
+            {/* Dinas Luar Section (Displayed only if not empty) */}
+            {currentDinasLuarStaff.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Building className="w-4 h-4 text-amber-600" />
+                    Petugas Dinas Luar Hari Ini ({currentDinasLuarStaff.length} Petugas)
+                  </h4>
+                  <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-mono font-bold">
+                    Dinas Luar
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                  {currentDinasLuarStaff.map((item) => (
+                    <div
+                      key={`dl-${item.id}`}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50/70 hover:bg-amber-100/60 border border-amber-200 transition"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Avatar profile={item.profile} size="sm" showStatus />
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-900 truncate">
+                            {item.profile?.full_name}
+                          </p>
+                          <p className="text-[10px] text-amber-800 truncate">
+                            {item.notes || item.shift?.name || 'Dinas Luar Instansi / Tugas Luar'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {item.profile?.phone && (
+                          <a
+                            href={`https://wa.me/${item.profile.phone.replace(/[^0-9]/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition"
+                            title={`Hubungi WhatsApp ${item.profile.full_name}`}
+                          >
+                            <Phone className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <span className="text-[10px] font-mono font-bold bg-amber-200 text-amber-900 px-2 py-0.5 rounded">
+                          Dinas Luar
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -1428,6 +1428,14 @@ class DataService {
       }
     }
 
+    // Filter out permanently deleted handover IDs
+    try {
+      const deletedIds = JSON.parse(localStorage.getItem('shift_atlm_deleted_handovers') || '[]');
+      if (deletedIds.length > 0) {
+        handovers = handovers.filter((h) => !deletedIds.includes(h.id));
+      }
+    } catch (e) {}
+
     // Attach shift & profile details
     const [allShifts, allProfiles] = await Promise.all([this.getShifts(), this.getProfiles()]);
     handovers = handovers.map((h) => ({
@@ -1563,11 +1571,21 @@ class DataService {
     const updated = all.filter((h) => h.id !== id);
     this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(updated));
 
+    try {
+      const deletedIds = JSON.parse(localStorage.getItem('shift_atlm_deleted_handovers') || '[]');
+      if (!deletedIds.includes(id)) {
+        deletedIds.push(id);
+        localStorage.setItem('shift_atlm_deleted_handovers', JSON.stringify(deletedIds));
+      }
+    } catch (e) {}
+
     if (this.isSupabaseAvailable()) {
       try {
         const { error } = await supabase.from('handovers').delete().eq('id', id);
         if (!error) {
           this.updateStatus({ connected: true, lastSynced: new Date() });
+        } else {
+          console.warn('Supabase delete handover error:', error.message);
         }
       } catch (err) {
         console.warn('Supabase delete handover failed:', err);
