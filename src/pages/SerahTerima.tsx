@@ -166,6 +166,8 @@ export default function SerahTerima() {
   const [targetConfirmHandover, setTargetConfirmHandover] = useState<Handover | null>(null);
   const [targetRejectHandover, setTargetRejectHandover] = useState<Handover | null>(null);
   const [selectedDetailModal, setSelectedDetailModal] = useState<Handover | null>(null);
+  const [deleteTargetHandover, setDeleteTargetHandover] = useState<Handover | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // History tab filters
   const [historySearch, setHistorySearch] = useState('');
@@ -211,7 +213,7 @@ export default function SerahTerima() {
   };
 
   // Reset form to blank new handover
-  const handleCreateNewHandover = () => {
+  const handleCreateNewHandover = (showNotice = true) => {
     const newId = `ho-${Date.now()}`;
     setCurrentHandoverId(newId);
     setShiftDate(getPontianakDateString());
@@ -275,7 +277,9 @@ export default function SerahTerima() {
     setPendingTasksList([]);
     setActiveTab('form');
     setSearchParams({});
-    showToast('Form Baru Dibuka', 'Silakan lengkapi data serah terima shift jaga');
+    if (showNotice) {
+      showToast('Form Baru Dibuka', 'Silakan lengkapi data serah terima shift jaga');
+    }
   };
 
   // Switch to viewing/editing an existing handover
@@ -553,20 +557,63 @@ export default function SerahTerima() {
     }
   };
 
-  const handleDeleteHandover = async (ho: Handover) => {
-    if (!window.confirm(`Yakin ingin menghapus dokumen/data serah terima tanggal ${ho.shift_date} (${ho.shift_from?.name} -> ${ho.shift_to?.name})?`)) {
-      return;
-    }
-    try {
-      await dataService.deleteHandover(ho.id);
-      showToast('Berhasil Dihapus', 'Dokumen serah terima telah dihapus dari sistem');
-      await refreshHandoversList();
-      if (currentHandoverId === ho.id) {
-        handleCreateNewHandover();
+  const promptDeleteHandover = (ho?: Handover | null) => {
+    if (ho) {
+      setDeleteTargetHandover(ho);
+    } else {
+      const existing = allHandovers.find((h) => h.id === currentHandoverId);
+      if (existing) {
+        setDeleteTargetHandover(existing);
+      } else {
+        setDeleteTargetHandover({
+          id: currentHandoverId,
+          shift_date: shiftDate,
+          shift_from_id: shiftFromId,
+          shift_to_id: shiftToId,
+          giver_profile_id: giverProfileId,
+          receiver_profile_id: receiverProfileId || undefined,
+          status: handoverStatus,
+          total_patients: totalPatientCount,
+          shift_from: shifts.find((s) => s.id === shiftFromId),
+          shift_to: shifts.find((s) => s.id === shiftToId),
+          giver: profiles.find((p) => p.id === giverProfileId),
+          receiver: profiles.find((p) => p.id === receiverProfileId),
+        });
       }
-    } catch (e) {
-      console.error('Error deleting handover:', e);
-      showToast('Gagal Menghapus', 'Terjadi kesalahan saat menghapus dokumen', 'error');
+    }
+  };
+
+  const handleDeleteHandover = (ho: Handover) => {
+    promptDeleteHandover(ho);
+  };
+
+  const executeDeleteHandover = async () => {
+    if (!deleteTargetHandover) return;
+    setIsDeleting(true);
+    const targetId = deleteTargetHandover.id;
+    const isTargetDraft = deleteTargetHandover.status === 'draft';
+
+    try {
+      await dataService.deleteHandover(targetId);
+      await refreshHandoversList();
+
+      if (currentHandoverId === targetId) {
+        handleCreateNewHandover(false);
+      }
+
+      setDeleteTargetHandover(null);
+      showToast(
+        isTargetDraft ? 'Draf Berhasil Dihapus' : 'Dokumen Berhasil Dihapus',
+        isTargetDraft
+          ? 'Formulir draf serah terima jaga telah dihapus dan direset bersih.'
+          : 'Dokumen serah terima telah dihapus permanen dari sistem.',
+        'success'
+      );
+    } catch (err) {
+      console.error('Error deleting handover:', err);
+      showToast('Gagal Menghapus', 'Terjadi kesalahan saat menghapus data serah terima', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -965,7 +1012,7 @@ export default function SerahTerima() {
 
                       {/* Receiver Actions / Admin Delete */}
                       <div className="flex items-center gap-2">
-                        {isAdmin && (
+                        {(isAdmin || ho.giver_profile_id === activeProfile.id) && (
                           <button
                             onClick={() => handleDeleteHandover(ho)}
                             className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2.5 px-3.5 rounded-xl transition-colors"
@@ -1065,22 +1112,15 @@ export default function SerahTerima() {
 
             {/* Action buttons */}
             <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-              {isAdmin && (
+              {(isAdmin || handoverStatus === 'draft' || giverProfileId === activeProfile.id) && (
                 <button
-                  onClick={() => {
-                    const ho = allHandovers.find(h => h.id === currentHandoverId);
-                    if (ho) {
-                      handleDeleteHandover(ho);
-                    } else {
-                      handleCreateNewHandover();
-                      showToast('Draf Dihapus', 'Formulir draf berhasil dibersihkan');
-                    }
-                  }}
+                  type="button"
+                  onClick={() => promptDeleteHandover()}
                   className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2.5 px-3.5 rounded-xl transition-colors min-h-[44px]"
-                  title="Hapus / Reset Formulir"
+                  title={handoverStatus === 'draft' ? 'Hapus / Bersihkan Formulir Draf' : 'Hapus Dokumen Serah Terima'}
                 >
                   <Trash2 className="w-4 h-4 text-rose-600" />
-                  <span>Hapus Formulir</span>
+                  <span>{handoverStatus === 'draft' ? 'Hapus Draf' : 'Hapus Formulir'}</span>
                 </button>
               )}
               {!isLocked && (
@@ -1894,7 +1934,7 @@ export default function SerahTerima() {
                       <Printer className="w-3.5 h-3.5" />
                     </button>
 
-                    {isAdmin && (
+                    {(isAdmin || ho.giver_profile_id === activeProfile.id) && (
                       <button
                         onClick={() => handleDeleteHandover(ho)}
                         className="bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold py-2 px-3 rounded-xl flex items-center justify-center transition-colors min-h-[40px]"
@@ -2098,6 +2138,35 @@ export default function SerahTerima() {
                 className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2.5 rounded-xl transition-colors"
               >
                 Batal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: KONFIRMASI HAPUS */}
+      {deleteTargetHandover && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
+            <h3 className="font-bold text-lg text-slate-900">Konfirmasi Hapus</h3>
+            <p className="text-sm text-slate-600 mt-2">
+              Apakah Anda yakin ingin menghapus {deleteTargetHandover.status === 'draft' ? 'draf ini' : 'data operan ini'}?
+              {deleteTargetHandover.status !== 'draft' && ' Data yang dihapus tidak dapat dikembalikan.'}
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setDeleteTargetHandover(null)}
+                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-lg transition-colors"
+                disabled={isDeleting}
+              >
+                Batal
+              </button>
+              <button
+                onClick={executeDeleteHandover}
+                className="flex-1 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
               </button>
             </div>
           </div>

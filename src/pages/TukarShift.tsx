@@ -240,6 +240,14 @@ export default function TukarShift() {
     loadData();
   };
 
+  const handleDeleteSwap = async (swap: ShiftSwap) => {
+    if (!window.confirm('Apakah Anda yakin ingin menghapus pengajuan tukar shift ini? Data jadwal akan kembali ke semula.')) return;
+    
+    await dataService.deleteShiftSwap(swap.id);
+    showToast('Berhasil Dihapus', 'Tukar shift telah dihapus dan jadwal dikembalikan ke asal.');
+    loadData();
+  };
+
   const handleBroadcastWhatsAppAll = (swap: ShiftSwap) => {
     const shiftName = swap.shift?.name || 'Shift Jaga';
     const shiftTime = swap.shift ? `${swap.shift.start_time.slice(0, 5)} - ${swap.shift.end_time.slice(0, 5)} WIB` : '';

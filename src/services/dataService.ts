@@ -1421,8 +1421,13 @@ class DataService {
 
     if (handovers.length === 0) {
       const local = localStorage.getItem(STORAGE_KEYS.HANDOVERS);
-      handovers = local ? JSON.parse(local) : INITIAL_HANDOVERS;
-      if (handovers.length === 0) {
+      if (local !== null) {
+        try {
+          handovers = JSON.parse(local) || [];
+        } catch (e) {
+          handovers = INITIAL_HANDOVERS;
+        }
+      } else {
         handovers = INITIAL_HANDOVERS;
         this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(INITIAL_HANDOVERS));
       }
@@ -1579,6 +1584,16 @@ class DataService {
       }
     } catch (e) {}
 
+    // Clean up any pending tasks associated with this deleted handover
+    try {
+      const allTasks = await this.getPendingTasks();
+      const updatedTasks = allTasks.filter((t) => t.handover_id !== id);
+      if (allTasks.length !== updatedTasks.length) {
+        this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify(updatedTasks));
+        this.broadcastChange('pending_tasks', 'DELETE', { handover_id: id });
+      }
+    } catch (e) {}
+
     if (this.isSupabaseAvailable()) {
       try {
         const { error } = await supabase.from('handovers').delete().eq('id', id);
@@ -1587,6 +1602,7 @@ class DataService {
         } else {
           console.warn('Supabase delete handover error:', error.message);
         }
+        await supabase.from('pending_tasks').delete().eq('handover_id', id);
       } catch (err) {
         console.warn('Supabase delete handover failed:', err);
       }
