@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   RefreshCw,
   Plus,
@@ -26,6 +27,7 @@ import {
   Users,
   Sparkles,
   Trash2,
+  RotateCcw,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString } from '../services/dataService';
@@ -44,7 +46,7 @@ export default function TukarShift() {
   const [profiles, setProfiles] = useState<UserProfile[]>(() => dataService.getCachedProfiles());
   const [shifts, setShifts] = useState<Shift[]>(() => dataService.getCachedShifts());
   const [allAssignments, setAllAssignments] = useState<ShiftAssignment[]>(() => dataService.getCachedAssignments());
-  const [loading, setLoading] = useState(false);
+
 
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
@@ -58,32 +60,7 @@ export default function TukarShift() {
     reason: '',
   });
 
-  const loadData = async (forceSpinner = false) => {
-    if (swaps.length === 0 || forceSpinner) {
-      setLoading(true);
-    }
-    try {
-      const [allSwaps, allProfiles, allShifts, assignmentsData] = await Promise.all([
-        dataService.getShiftSwaps(),
-        dataService.getProfiles(),
-        dataService.getShifts(),
-        dataService.getAssignments(),
-      ]);
-      setSwaps(allSwaps);
-      setProfiles(allProfiles);
-      setShifts(allShifts);
-      setAllAssignments(assignmentsData);
 
-      const otherProfiles = allProfiles.filter((p) => p.id !== activeProfile.id);
-      if (otherProfiles.length > 0 && !formData.target_profile_id) {
-        setFormData((prev) => ({ ...prev, target_profile_id: otherProfiles[0].id }));
-      }
-    } catch (err) {
-      console.error('Error loading shift swaps:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Scheduled assignments for the logged-in officer
   const myAssignments = React.useMemo(() => {
@@ -108,9 +85,41 @@ export default function TukarShift() {
     );
   }, [allAssignments, formData.target_profile_id, formData.shift_date]);
 
-  useEffect(() => {
-    loadData();
+  const { data: swapData, refetch } = useQuery({
+    queryKey: ['shiftSwaps', activeProfile.id],
+    queryFn: async () => {
+      const [allSwaps, allProfiles, allShifts, assignmentsData] = await Promise.all([
+        dataService.getShiftSwaps(),
+        dataService.getProfiles(),
+        dataService.getShifts(),
+        dataService.getAssignments(),
+      ]);
+      return { allSwaps, allProfiles, allShifts, assignmentsData };
+    },
+    initialData: () => ({
+      allSwaps: dataService.getCachedShiftSwaps(),
+      allProfiles: dataService.getCachedProfiles(),
+      allShifts: dataService.getCachedShifts(),
+      assignmentsData: dataService.getCachedAssignments(),
+    }),
+    staleTime: 1000 * 60 * 5,
+  });
 
+  useEffect(() => {
+    if (swapData) {
+      setSwaps(swapData.allSwaps);
+      setProfiles(swapData.allProfiles);
+      setShifts(swapData.allShifts);
+      setAllAssignments(swapData.assignmentsData);
+
+      const otherProfiles = swapData.allProfiles.filter((p) => p.id !== activeProfile.id);
+      if (otherProfiles.length > 0 && !formData.target_profile_id) {
+        setFormData((prev) => ({ ...prev, target_profile_id: otherProfiles[0].id }));
+      }
+    }
+  }, [swapData, activeProfile.id]);
+
+  useEffect(() => {
     // Check push reminders for upcoming approved swaps
     pushNotificationService.checkAndTriggerSwapReminders();
 
@@ -122,7 +131,7 @@ export default function TukarShift() {
         event.table === 'profiles' ||
         event.table === 'ALL'
       ) {
-        loadData();
+        refetch();
       }
     });
 
@@ -202,7 +211,7 @@ export default function TukarShift() {
       await dataService.saveShiftSwap(newSwap);
       showToast('Pengajuan Terkirim', 'Pengajuan tukar shift berhasil dibuat dan menunggu persetujuan.');
       setModalOpen(false);
-      loadData();
+      refetch();
     } catch (err) {
       console.error('Error saving shift swap:', err);
       showToast('Gagal Mengirim', 'Terjadi kesalahan sistem saat mengirim pengajuan', 'error');
@@ -233,13 +242,13 @@ export default function TukarShift() {
       'Tukar Shift Disetujui',
       'Pemberitahuan resmi otomatis disiarkan ke seluruh rekan ATLM dan pengingat aktif sampai Hari H!'
     );
-    loadData();
+    refetch();
   };
 
   const handleReject = async (id: string) => {
     await dataService.updateShiftSwapStatus(id, 'rejected', activeProfile.id);
     showToast('Ditolak', 'Pengajuan tukar shift ditolak', 'error');
-    loadData();
+    refetch();
   };
 
   const handleDeleteSwap = async (swap: ShiftSwap) => {
@@ -247,7 +256,7 @@ export default function TukarShift() {
     
     await dataService.deleteShiftSwap(swap.id);
     showToast('Berhasil Dihapus', 'Tukar shift telah dihapus dan jadwal dikembalikan ke asal.');
-    loadData();
+    refetch();
   };
 
   const handleBroadcastWhatsAppAll = (swap: ShiftSwap) => {
@@ -299,7 +308,7 @@ export default function TukarShift() {
     swap.whatsapp_sent = true;
     dataService.saveShiftSwap(swap);
     showToast('WhatsApp Dibuka', 'Pesan konfirmasi tukar shift telah disiapkan untuk WhatsApp.');
-    loadData();
+    refetch();
   };
 
   return (
@@ -654,13 +663,13 @@ export default function TukarShift() {
                                 if (window.confirm('Batalkan tukar shift ini? Jadwal petugas akan otomatis dikembalikan ke shift awal.')) {
                                   await dataService.cancelShiftSwap(s.id, activeProfile.id);
                                   showToast('Tukar Shift Dibatalkan', 'Jadwal shift petugas dikembalikan ke shift awal secara otomatis.');
-                                  loadData();
+                                  refetch();
                                 }
                               }}
-                              className="flex items-center gap-1 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold py-2 px-3 rounded-xl transition-colors"
+                              className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-3 rounded-xl transition-all shadow-sm active:scale-95"
                             >
-                              <XCircle className="w-3.5 h-3.5 text-amber-700" />
-                              <span>Batalkan &amp; Revert</span>
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Batalkan</span>
                             </button>
                           )}
                           <button
@@ -668,10 +677,10 @@ export default function TukarShift() {
                               if (window.confirm('Hapus pengajuan tukar shift ini? Jika sudah disetujui, jadwal akan dikembalikan ke shift awal.')) {
                                 await dataService.deleteShiftSwap(s.id);
                                 showToast('Tukar Shift Dihapus', 'Data pertukaran shift dihapus dan jadwal dikembalikan.');
-                                loadData();
+                                refetch();
                               }
                             }}
-                            className="flex items-center gap-1 bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold py-2 px-3 rounded-xl transition-colors"
+                            className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-3 rounded-xl transition-all shadow-sm active:scale-95"
                             title="Hapus tukar shift dan kembalikan jadwal"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
