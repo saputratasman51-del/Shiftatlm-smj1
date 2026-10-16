@@ -26,6 +26,8 @@ import {
   Download,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { JadwalSkeleton } from '../components/SkeletonLoader';
 import { dataService, getPontianakDateString } from '../services/dataService';
 import { Shift, ShiftAssignment, UserProfile } from '../types';
 import { useToast } from '../components/Toast';
@@ -47,7 +49,7 @@ export default function JadwalShift() {
   });
   const [shifts, setShifts] = useState<Shift[]>(() => dataService.getCachedShifts());
   const [profiles, setProfiles] = useState<UserProfile[]>(() => dataService.getCachedProfiles());
-  const [loading, setLoading] = useState(false);
+
 
   // View mode: 'list' | 'calendar' | 'matrix'
   const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'matrix'>('list');
@@ -178,7 +180,7 @@ export default function JadwalShift() {
     setImportResult({ successCount, errors });
     if (successCount > 0) {
       showToast('Impor Selesai', `Berhasil menambahkan ${successCount} jadwal shift otomatis.`);
-      loadData();
+      refetch();
     }
   };
 
@@ -187,26 +189,32 @@ export default function JadwalShift() {
       showToast('Akses Dibatasi', 'Hanya administrator yang dapat mengubah jadwal', 'error');
       return;
     }
-    const existing = assignments.find((a) => a.profile_id === profileId && a.shift_date === dateStr);
 
     if (!shiftId) {
-      if (existing) {
-        await dataService.deleteAssignment(existing.id);
-        showToast('Jadwal Dihapus', `Jadwal tanggal ${dateStr} dikosongkan`);
-        loadData();
+      // Clear all assignments for this staff on this date
+      const staffDayAssignments = assignments.filter((a) => a.profile_id === profileId && a.shift_date === dateStr);
+      for (const a of staffDayAssignments) {
+        await dataService.deleteAssignment(a.id);
       }
+      showToast('Jadwal Dihapus', `Seluruh jadwal tanggal ${dateStr} dikosongkan`);
       setMatrixCellPopup(null);
+      refetch();
       return;
     }
 
+    // Check if this exact shift already exists for this staff on this date
+    const existingSameShift = assignments.find(
+      (a) => a.profile_id === profileId && a.shift_date === dateStr && a.shift_id === shiftId
+    );
+
     const payload: ShiftAssignment = {
-      id: existing ? existing.id : `assign-${Date.now()}-${Math.random()}`,
+      id: existingSameShift ? existingSameShift.id : `assign-${Date.now()}-${Math.random()}`,
       profile_id: profileId,
       shift_id: shiftId,
       shift_date: dateStr,
       status: 'scheduled',
       created_by: activeProfile.id,
-      created_at: existing?.created_at || new Date().toISOString(),
+      created_at: existingSameShift?.created_at || new Date().toISOString(),
     };
 
     const res = await dataService.saveAssignment(payload);
@@ -217,7 +225,7 @@ export default function JadwalShift() {
 
     showToast('Jadwal Disimpan', `Shift berhasil diperbarui untuk tanggal ${dateStr}`);
     setMatrixCellPopup(null);
-    loadData();
+    refetch();
   };
 
   const getDaysInSelectedMonth = () => {
@@ -246,22 +254,31 @@ export default function JadwalShift() {
     playAlarmSound('holiday');
   };
 
-  const loadData = async (forceSpinner = false) => {
-    if (assignments.length === 0 || forceSpinner) {
-      setLoading(true);
-    }
-    try {
+  const { data: jadwalData, isLoading, refetch } = useQuery({
+    queryKey: ['jadwalData', selectedMonth],
+    queryFn: async () => {
       const [allAssignments, allShifts, allProfiles] = await Promise.all([
         dataService.getAssignments({ month: selectedMonth }),
         dataService.getShifts(),
         dataService.getProfiles(),
       ]);
-      setAssignments(allAssignments);
-      setShifts(allShifts);
-      setProfiles(allProfiles);
+      return { allAssignments, allShifts, allProfiles };
+    },
+    initialData: () => ({
+      allAssignments: dataService.getCachedAssignments({ month: selectedMonth }),
+      allShifts: dataService.getCachedShifts(),
+      allProfiles: dataService.getCachedProfiles(),
+    }),
+    staleTime: 1000 * 60 * 5,
+  });
 
-      // Check if logged in staff is off duty today
-      const myTodayShift = allAssignments.find(
+  useEffect(() => {
+    if (jadwalData) {
+      setAssignments(jadwalData.allAssignments);
+      setShifts(jadwalData.allShifts);
+      setProfiles(jadwalData.allProfiles);
+
+      const myTodayShift = jadwalData.allAssignments.find(
         (a) => a.profile_id === activeProfile.id && a.shift_date === todayDateStr && a.status !== 'cancelled'
       );
       const isOffDuty = !myTodayShift;
@@ -276,22 +293,11 @@ export default function JadwalShift() {
           playAlarmSound('holiday');
         }
       }
-    } catch (err) {
-      console.error('Error loading schedule:', err);
-    } finally {
-      setLoading(false);
+
     }
-  };
+  }, [jadwalData, selectedMonth]);
 
   useEffect(() => {
-    // Immediately pull cached assignments for selectedMonth in 0ms
-    const cached = dataService.getCachedAssignments({ month: selectedMonth });
-    if (cached.length > 0) {
-      setAssignments(cached);
-    }
-    loadData();
-
-    // Subscribe to realtime updates across all devices
     const unsubscribe = dataService.subscribe((event) => {
       if (
         event.table === 'shift_assignments' ||
@@ -300,7 +306,7 @@ export default function JadwalShift() {
         event.table === 'shift_swaps' ||
         event.table === 'ALL'
       ) {
-        loadData();
+        refetch();
       }
     });
 
@@ -373,7 +379,7 @@ export default function JadwalShift() {
       `Jadwal shift berhasil disimpan untuk tanggal ${payload.shift_date}`
     );
     setModalOpen(false);
-    loadData();
+    refetch();
   };
 
   // Cancel / Delete assignment
@@ -381,7 +387,7 @@ export default function JadwalShift() {
     await dataService.deleteAssignment(id);
     showToast('Jadwal Dihapus', 'Jadwal shift berhasil dihapus dari sistem');
     setDeleteConfirmId(null);
-    loadData();
+    refetch();
   };
 
   // Calendar matrix calculation
@@ -405,6 +411,10 @@ export default function JadwalShift() {
     }
     return days;
   };
+
+  if (isLoading && assignments.length === 0) {
+    return <JadwalSkeleton />;
+  }
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -879,10 +889,9 @@ export default function JadwalShift() {
                       </div>
                     </td>
                     {getDaysInSelectedMonth().map((day) => {
-                      const assignment = assignments.find(
-                        (a) => a.profile_id === p.id && a.shift_date === day.dateStr
+                      const staffAssignments = assignments.filter(
+                        (a) => a.profile_id === p.id && a.shift_date === day.dateStr && a.status !== 'cancelled'
                       );
-                      const shiftObj = assignment?.shift;
                       return (
                         <td
                           key={day.dateStr}
@@ -894,15 +903,20 @@ export default function JadwalShift() {
                           className={`p-1 border border-slate-200 text-center cursor-pointer transition-transform active:scale-95 ${
                             isAdmin ? 'hover:bg-teal-50' : 'cursor-default'
                           }`}
-                          title={`${p.full_name} - ${day.dateStr}${shiftObj ? ': ' + shiftObj.name : ': Kosong'}`}
+                          title={`${p.full_name} - ${day.dateStr}${staffAssignments.length > 0 ? ': ' + staffAssignments.map(a => a.shift?.name).join(', ') : ': Kosong'}`}
                         >
-                          {shiftObj ? (
-                            <span
-                              className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-2xs"
-                              style={{ backgroundColor: shiftObj.color_code }}
-                            >
-                              {shiftObj.code}
-                            </span>
+                          {staffAssignments.length > 0 ? (
+                            <div className="flex flex-col gap-0.5 items-center justify-center">
+                              {staffAssignments.map((a) => (
+                                <span
+                                  key={a.id}
+                                  className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold text-white shadow-2xs"
+                                  style={{ backgroundColor: a.shift?.color_code || '#0284c7' }}
+                                >
+                                  {a.shift?.code || 'Shift'}
+                                </span>
+                              ))}
+                            </div>
                           ) : (
                             <span className="text-slate-300 text-[10px]">-</span>
                           )}

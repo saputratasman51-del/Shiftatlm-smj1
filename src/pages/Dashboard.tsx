@@ -30,6 +30,8 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { DashboardSkeleton } from '../components/SkeletonLoader';
 import {
   dataService,
   getPontianakDateString,
@@ -283,11 +285,9 @@ export default function Dashboard() {
     timeZone: 'Asia/Pontianak',
   });
 
-  const loadDashboardData = async (forceSpinner = false) => {
-    if (todayAssignments.length === 0 || forceSpinner) {
-      setLoading(true);
-    }
-    try {
+  const { data: dashboardData, isLoading, refetch } = useQuery({
+    queryKey: ['dashboardData', todayStr, activeProfile.id],
+    queryFn: async () => {
       const [assignments, shifts, handovers, tasks, categories] = await Promise.all([
         dataService.getAssignments({ date: todayStr }),
         dataService.getShifts(),
@@ -296,34 +296,19 @@ export default function Dashboard() {
         dataService.getCategories(),
       ]);
 
-      setTodayAssignments(assignments);
-      setAllShifts(shifts);
-      setAllHandovers(handovers);
-      setAllCategories(categories);
-      setRecentHandovers(handovers.slice(0, 5));
-      setPendingTasks(tasks.filter((t) => t.status !== 'selesai' && t.status !== 'dibatalkan'));
-
-      // Determine current active shift and duty date
       const dutyInfo = getCurrentDutyShiftInfo(shifts);
-      setCurrentDutyInfo(dutyInfo);
-      setCurrentActiveShift(dutyInfo.activeShift || shifts[0]);
-
       let onDutyAssignments = assignments;
       if (dutyInfo.isNightShiftPostMidnight) {
-        // Rentang pukul 21.00-07.00 yang sudah berganti hari (00:00 - 06:59):
-        // Membaca petugas yang shift 21.00 kemarin, bukan petugas malam nanti
         const yesterdayAssignments = await dataService.getAssignments({ date: dutyInfo.dutyDate });
         onDutyAssignments = yesterdayAssignments;
       }
 
-      if (dutyInfo.activeShift) {
-        const onDuty = onDutyAssignments.filter(
-          (a) => a.shift_id === dutyInfo.activeShift!.id && a.shift_date === dutyInfo.dutyDate && a.status !== 'cancelled'
-        );
-        setOnDutyStaffNow(onDuty);
-      }
+      const onDuty = dutyInfo.activeShift
+        ? onDutyAssignments.filter(
+            (a) => a.shift_id === dutyInfo.activeShift!.id && a.shift_date === dutyInfo.dutyDate && a.status !== 'cancelled'
+          )
+        : [];
 
-      // Check current user's assignment (either ongoing yesterday night shift or scheduled today)
       const myOngoingNight = dutyInfo.isNightShiftPostMidnight
         ? onDutyAssignments.find(
             (a) =>
@@ -335,45 +320,90 @@ export default function Dashboard() {
         : null;
       const myTodayScheduled = assignments.find((a) => a.profile_id === activeProfile.id && a.status !== 'cancelled');
       const mine = myOngoingNight || myTodayScheduled || null;
-      setMyShiftToday(mine);
 
-      // Check partners on the same shift
-      if (mine) {
-        const pool = myOngoingNight ? onDutyAssignments : assignments;
-        const partners = pool.filter(
-          (a) =>
-            a.shift_id === mine.shift_id &&
-            a.shift_date === mine.shift_date &&
-            a.profile_id !== activeProfile.id &&
-            a.status !== 'cancelled'
-        );
-        setShiftPartners(partners);
-      } else {
-        setShiftPartners([]);
-      }
+      const partners = mine
+        ? (myOngoingNight ? onDutyAssignments : assignments).filter(
+            (a) =>
+              a.shift_id === mine.shift_id &&
+              a.shift_date === mine.shift_date &&
+              a.profile_id !== activeProfile.id &&
+              a.status !== 'cancelled'
+          )
+        : [];
 
-      // Check for unreceived / pending handovers requiring attention
       const warningHo = handovers.find((h) => h.status === 'pending');
-      setUnreadHandoverWarning(warningHo || null);
-    } catch (err) {
-      console.error('Error loading dashboard:', err);
-    } finally {
+
+      return {
+        assignments,
+        shifts,
+        handovers,
+        tasks,
+        categories,
+        dutyInfo,
+        activeShift: dutyInfo.activeShift || shifts[0],
+        onDuty,
+        mine,
+        partners,
+        warningHo,
+      };
+    },
+    initialData: () => {
+      const cachedAssignments = dataService.getCachedAssignments({ date: todayStr });
+      const cachedShifts = dataService.getCachedShifts();
+      const cachedHandovers = dataService.getCachedHandovers();
+      const cachedTasks = dataService.getCachedPendingTasks();
+      const cachedCategories = dataService.getCachedCategories();
+      const dutyInfo = getCurrentDutyShiftInfo(cachedShifts);
+      const mine = cachedAssignments.find((a) => a.profile_id === activeProfile.id && a.status !== 'cancelled') || null;
+      const partners = mine
+        ? cachedAssignments.filter(
+            (a) => a.shift_id === mine.shift_id && a.profile_id !== activeProfile.id && a.status !== 'cancelled'
+          )
+        : [];
+      return {
+        assignments: cachedAssignments,
+        shifts: cachedShifts,
+        handovers: cachedHandovers,
+        tasks: cachedTasks,
+        categories: cachedCategories,
+        dutyInfo,
+        activeShift: dutyInfo.activeShift || cachedShifts[0],
+        onDuty: [],
+        mine,
+        partners,
+        warningHo: cachedHandovers.find((h) => h.status === 'pending') || undefined,
+      };
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+
+  React.useEffect(() => {
+    if (dashboardData) {
+      setTodayAssignments(dashboardData.assignments);
+      setAllShifts(dashboardData.shifts);
+      setAllHandovers(dashboardData.handovers);
+      setAllCategories(dashboardData.categories);
+      setRecentHandovers(dashboardData.handovers.slice(0, 5));
+      setPendingTasks(dashboardData.tasks.filter((t) => t.status !== 'selesai' && t.status !== 'dibatalkan'));
+      setCurrentDutyInfo(dashboardData.dutyInfo);
+      setCurrentActiveShift(dashboardData.activeShift);
+      setOnDutyStaffNow(dashboardData.onDuty);
+      setMyShiftToday(dashboardData.mine);
+      setShiftPartners(dashboardData.partners);
+      setUnreadHandoverWarning(dashboardData.warningHo || null);
       setLoading(false);
     }
-  };
+  }, [dashboardData]);
 
   useEffect(() => {
-    loadDashboardData();
-
-    // Subscribe to realtime updates across all devices
     const unsubscribe = dataService.subscribe(() => {
-      loadDashboardData();
+      refetch();
       dataService.getProfiles().then(setAllProfilesList);
       dataService.getAssignments({ month: selectedMonthForStaff }).then(setMonthlyAssignments);
     });
 
     return () => unsubscribe();
-  }, [activeProfile.id, selectedMonthForStaff]);
+  }, [selectedMonthForStaff]);
 
   // Ringkasan Jadwal Harian Hari Ini (Pagi, Siang, Malam)
   const dailyShiftSummary = React.useMemo(() => {
@@ -408,6 +438,10 @@ export default function Dashboard() {
 
     return Object.values(map);
   }, [todayAssignments, allShifts]);
+
+  if (isLoading && todayAssignments.length === 0) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="space-y-5 animate-fade-in">

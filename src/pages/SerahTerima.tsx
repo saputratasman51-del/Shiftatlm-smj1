@@ -34,6 +34,8 @@ import {
   Inbox,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { SerahTerimaSkeleton } from '../components/SkeletonLoader';
 import {
   dataService,
   getPontianakDateString,
@@ -65,7 +67,7 @@ export default function SerahTerima() {
   const [profiles, setProfiles] = useState<UserProfile[]>(() => dataService.getCachedProfiles());
   const [allHandovers, setAllHandovers] = useState<Handover[]>(() => dataService.getCachedHandovers());
   const [assignments, setAssignments] = useState<ShiftAssignment[]>(() => dataService.getCachedAssignments());
-  const [loading, setLoading] = useState(false);
+
 
   // Navigation tab: 'masuk' (Operan Masuk) | 'form' (Formulir Serah Terima) | 'riwayat' (Data & Riwayat)
   const [activeTab, setActiveTab] = useState<'masuk' | 'form' | 'riwayat'>(() => {
@@ -314,93 +316,84 @@ export default function SerahTerima() {
     setSearchParams({ id: ho.id });
   };
 
-  // Load initial references & handover data
+  const { data: serahTerimaData, isLoading, refetch } = useQuery({
+    queryKey: ['serahTerimaData'],
+    queryFn: async () => {
+      const [cats, sList, pList, allHo, allAsg] = await Promise.all([
+        dataService.getCategories(),
+        dataService.getShifts(),
+        dataService.getProfiles(),
+        dataService.getHandovers(),
+        dataService.getAssignments(),
+      ]);
+      return { cats, sList, pList, allHo, allAsg };
+    },
+    initialData: () => ({
+      cats: dataService.getCachedCategories(),
+      sList: dataService.getCachedShifts(),
+      pList: dataService.getCachedProfiles(),
+      allHo: dataService.getCachedHandovers(),
+      allAsg: dataService.getCachedAssignments(),
+    }),
+    staleTime: 1000 * 60 * 5,
+  });
+
   useEffect(() => {
-    const initData = async () => {
-      if (categories.length === 0 || allHandovers.length === 0) {
-        setLoading(true);
+    if (serahTerimaData) {
+      setCategories(serahTerimaData.cats);
+      setShifts(serahTerimaData.sList);
+      setProfiles(serahTerimaData.pList);
+      setAllHandovers(serahTerimaData.allHo);
+      setAssignments(serahTerimaData.allAsg);
+
+      if (serahTerimaData.sList.length >= 2) {
+        setShiftFromId((prev) => prev || serahTerimaData.sList[0].id);
+        setShiftToId((prev) => prev || serahTerimaData.sList[1].id);
       }
-      try {
-        const [cats, sList, pList, allHo, allAsg] = await Promise.all([
-          dataService.getCategories(),
-          dataService.getShifts(),
-          dataService.getProfiles(),
-          dataService.getHandovers(),
-          dataService.getAssignments(),
-        ]);
-        setCategories(cats);
-        setShifts(sList);
-        setProfiles(pList);
-        setAllHandovers(allHo);
-        setAssignments(allAsg);
 
-        // Default shifts if not set
-        if (sList.length >= 2) {
-          setShiftFromId((prev) => prev || sList[0].id);
-          setShiftToId((prev) => prev || sList[1].id);
+      const otherStaff = serahTerimaData.pList.find((p) => p.id !== activeProfile.id);
+      if (otherStaff) {
+        setReceiverProfileId((prev) => prev || otherStaff.id);
+      }
+
+      if (handoverIdParam) {
+        const ho = serahTerimaData.allHo.find((h) => h.id === handoverIdParam);
+        if (ho) {
+          populateFormWithHandover(ho);
+          setActiveTab('form');
         }
-
-        // Default receiver if not set
-        const otherStaff = pList.find((p) => p.id !== activeProfile.id);
-        if (otherStaff) {
-          setReceiverProfileId((prev) => prev || otherStaff.id);
-        }
-
-        // Check if loading existing handover from URL query
-        if (handoverIdParam) {
-          const ho = allHo.find((h) => h.id === handoverIdParam) || (await dataService.getHandoverById(handoverIdParam));
-          if (ho) {
-            populateFormWithHandover(ho);
-            setActiveTab('form');
-          }
-        } else {
-          // Initialize categories map for new form if empty
-          setCategoryDataMap((prev) => {
-            const initialMap: Record<string, HandoverCategoryData> = { ...prev };
-            cats.forEach((c) => {
-              if (!initialMap[c.id]) {
-                initialMap[c.id] = {
-                  category_id: c.id,
-                  patient_count: 0,
-                  ongoing_tests: '',
-                  pending_samples: '',
-                  unverified_results: '',
-                  issues_notes: '',
-                  work_status: 'selesai',
-                };
-              }
-            });
-            return initialMap;
+      } else {
+        setCategoryDataMap((prev) => {
+          const initialMap: Record<string, HandoverCategoryData> = { ...prev };
+          serahTerimaData.cats.forEach((c) => {
+            if (!initialMap[c.id]) {
+              initialMap[c.id] = {
+                category_id: c.id,
+                patient_count: 0,
+                ongoing_tests: '',
+                pending_samples: '',
+                unverified_results: '',
+                issues_notes: '',
+                work_status: 'selesai',
+              };
+            }
           });
-        }
-      } catch (err) {
-        console.error('Error initializing handover:', err);
-      } finally {
-        setLoading(false);
+          return initialMap;
+        });
       }
-    };
-    initData();
 
-    // Subscribe to realtime updates for handovers
+    }
+  }, [serahTerimaData, handoverIdParam, activeProfile.id]);
+
+  useEffect(() => {
     const unsubscribe = dataService.subscribe((event) => {
       if (event.table === 'handovers' || event.table === 'ALL') {
-        refreshHandoversList().then((freshList) => {
-          if (handoverIdParam) {
-            const ho = freshList.find((h) => h.id === handoverIdParam);
-            if (ho) {
-              setHandoverStatus(ho.status);
-              setStatusLogs(ho.status_logs || []);
-              if (ho.categories_data) setCategoryDataMap(ho.categories_data);
-              if (ho.lab_conditions) setLabConditions(ho.lab_conditions);
-              if (ho.pending_tasks) setPendingTasksList(ho.pending_tasks);
-            }
-          }
-        });
+        refetch();
       }
     });
 
     return () => unsubscribe();
-  }, [handoverIdParam, activeProfile.id]);
+  }, [handoverIdParam]);
 
   // Update category field
   const handleCategoryFieldChange = (
@@ -670,6 +663,10 @@ export default function SerahTerima() {
       return matchSearch && matchStatus && matchDate;
     });
   }, [allHandovers, historySearch, historyStatusFilter, historyDateFilter]);
+
+  if (isLoading && allHandovers.length === 0) {
+    return <SerahTerimaSkeleton />;
+  }
 
   return (
     <div className="space-y-5 animate-fade-in pb-16">

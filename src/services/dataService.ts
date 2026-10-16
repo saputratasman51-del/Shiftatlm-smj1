@@ -1679,7 +1679,8 @@ class DataService {
   public async saveAssignment(assignment: ShiftAssignment): Promise<{ success: boolean; conflict?: string }> {
     const all = await this.getAssignments();
 
-    // Check for schedule conflict: same staff on the same date with conflicting or same shift
+    // Check for schedule conflict: same staff on the same date with the SAME shift.
+    // Double shifts (different shifts on the same day) are fully allowed.
     const conflict = all.find(
       (a) =>
         a.id !== assignment.id &&
@@ -1692,7 +1693,7 @@ class DataService {
     if (conflict) {
       return {
         success: false,
-        conflict: `Petugas sudah dijadwalkan pada shift tersebut di tanggal ${assignment.shift_date}!`,
+        conflict: `Petugas sudah dijadwalkan pada shift yang sama di tanggal ${assignment.shift_date}! (Double shift diperbolehkan untuk shift yang berbeda)`,
       };
     }
 

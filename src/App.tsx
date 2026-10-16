@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/Toast';
 import { Layout } from './components/Layout';
@@ -19,13 +20,25 @@ import Profil from './pages/Profil';
 import AdminSettings from './pages/AdminSettings';
 import Login from './pages/Login';
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5, // 5 minutes
+      gcTime: 1000 * 60 * 30, // 30 minutes
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
+
 function AppContent() {
   const { isLoggedIn, loading } = useAuth();
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-teal-950 flex items-center justify-center text-white text-sm font-semibold">
-        Memuat Aplikasi SHIFT ATLM...
+      <div className="min-h-screen bg-teal-950 flex flex-col items-center justify-center text-white p-6 animate-fade-in">
+        <div className="w-12 h-12 border-4 border-teal-500 border-t-white rounded-full animate-spin mb-4"></div>
+        <p className="text-sm font-semibold tracking-widest uppercase">Memuat Aplikasi...</p>
       </div>
     );
   }
@@ -54,12 +67,14 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <ToastProvider>
-        <BrowserRouter>
-          <AppContent />
-        </BrowserRouter>
-      </ToastProvider>
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <ToastProvider>
+          <BrowserRouter>
+            <AppContent />
+          </BrowserRouter>
+        </ToastProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }
