@@ -28,10 +28,10 @@ export default function Riwayat() {
   const { activeProfile, isAdmin } = useAuth();
   const navigate = useNavigate();
 
-  const [handovers, setHandovers] = useState<Handover[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [profiles, setProfiles] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [handovers, setHandovers] = useState<Handover[]>(() => dataService.getCachedHandovers());
+  const [shifts, setShifts] = useState<Shift[]>(() => dataService.getCachedShifts());
+  const [profiles, setProfiles] = useState<UserProfile[]>(() => dataService.getCachedProfiles());
+  const [loading, setLoading] = useState(false);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -46,8 +46,10 @@ export default function Riwayat() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 8;
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (forceSpinner = false) => {
+    if (handovers.length === 0 || forceSpinner) {
+      setLoading(true);
+    }
     try {
       const [allHandovers, allShifts, allProfiles] = await Promise.all([
         dataService.getHandovers(),

@@ -642,6 +642,93 @@ export function getPontianakTimeString(date: Date = new Date()): string {
   }).format(date);
 }
 
+export interface ActiveDutyInfo {
+  activeShift: Shift | null;
+  dutyDate: string; // The date of the shift assignment
+  isNightShiftPostMidnight: boolean; // True if 00:00-06:59 during overnight night shift
+  timeRangeDisplay: string;
+  descriptionText: string;
+}
+
+/**
+ * Calculates current active shift and exact duty date.
+ * For night shift (21:00-07:00):
+ * If the day has changed (00:00 - 06:59), the currently working duty staff is the staff
+ * assigned to the 21:00 shift yesterday, NOT today's upcoming 21:00 shift.
+ */
+export function getCurrentDutyShiftInfo(shifts: Shift[] = []): ActiveDutyInfo {
+  const todayStr = getPontianakDateString();
+  const timeStr = getPontianakTimeString();
+  const [curH, curM] = timeStr.split(':').map(Number);
+  const curMinutes = (isNaN(curH) ? 0 : curH) * 60 + (isNaN(curM) ? 0 : curM);
+
+  // Yesterday date string
+  const todayDate = new Date(todayStr);
+  const yesterdayDate = new Date(todayDate);
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
+
+  const pagiShift =
+    shifts.find((s) => s.code === 'PAGI') ||
+    shifts.find((s) => s.name?.toLowerCase().includes('pagi')) ||
+    shifts[0] ||
+    null;
+  const siangShift =
+    shifts.find((s) => s.code === 'SIANG') ||
+    shifts.find((s) => s.name?.toLowerCase().includes('siang')) ||
+    shifts[1] ||
+    null;
+  const malamShift =
+    shifts.find((s) => s.code === 'MALAM') ||
+    shifts.find((s) => s.name?.toLowerCase().includes('malam')) ||
+    shifts[2] ||
+    null;
+
+  // Shift Pagi: 07:00 - 14:00 (420 - 840 min)
+  if (curMinutes >= 7 * 60 && curMinutes < 14 * 60) {
+    return {
+      activeShift: pagiShift,
+      dutyDate: todayStr,
+      isNightShiftPostMidnight: false,
+      timeRangeDisplay: '07:00 - 14:00 WIB',
+      descriptionText: 'Shift Pagi sedang berlangsung',
+    };
+  }
+
+  // Shift Siang: 14:00 - 21:00 (840 - 1260 min)
+  if (curMinutes >= 14 * 60 && curMinutes < 21 * 60) {
+    return {
+      activeShift: siangShift,
+      dutyDate: todayStr,
+      isNightShiftPostMidnight: false,
+      timeRangeDisplay: '14:00 - 21:00 WIB',
+      descriptionText: 'Shift Siang sedang berlangsung',
+    };
+  }
+
+  // Shift Malam: 21:00 - 07:00 (1260 min to 420 min next day)
+  // Rentang 21:00 - 23:59 (Hari ini sebelum berganti hari)
+  if (curMinutes >= 21 * 60) {
+    return {
+      activeShift: malamShift,
+      dutyDate: todayStr,
+      isNightShiftPostMidnight: false,
+      timeRangeDisplay: '21:00 - 07:00 WIB',
+      descriptionText: 'Shift Malam sedang berlangsung (Mulai 21:00 Malam Ini)',
+    };
+  }
+
+  // Rentang 00:00 - 06:59 (Sudah berganti hari selama rentang 21.00-07.00)
+  // Yang terbaca tetap petugas yang shift 21.00 hari kemarin, bukan petugas shift malam besoknya
+  return {
+    activeShift: malamShift,
+    dutyDate: yesterdayStr,
+    isNightShiftPostMidnight: true,
+    timeRangeDisplay: '21:00 - 07:00 WIB',
+    descriptionText: 'Shift Malam sedang berlangsung (Mulai 21:00 Kemarin s/d 07:00 Pagi Ini)',
+  };
+}
+
 export type RealtimeEventCallback = (event: {
   table: string;
   action: 'INSERT' | 'UPDATE' | 'DELETE' | 'SYNC';
@@ -658,6 +745,8 @@ export type SyncStatus = {
 
 class DataService {
   private realtimeChannel: any = null;
+  private reconnectTimer: any = null;
+  private heartbeatTimer: any = null;
   private listeners: Set<RealtimeEventCallback> = new Set();
   private statusListeners: Set<(status: SyncStatus) => void> = new Set();
   private syncStatus: SyncStatus = {
@@ -671,6 +760,23 @@ class DataService {
   constructor() {
     this.syncStatus.isSupabaseConfigured = this.isSupabaseAvailable();
     this.setupRealtimeSync();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        console.log('Browser online, reconnecting realtime & syncing data...');
+        this.reconnectAndSync();
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          console.log('Tab visible, checking sync & realtime...');
+          this.reconnectAndSync();
+        }
+      });
+      // Background heartbeat sync every 12 seconds for multi-browser consistency
+      this.heartbeatTimer = setInterval(() => {
+        this.syncAllFromRemote();
+      }, 12000);
+    }
   }
 
   public isSupabaseAvailable(): boolean {
@@ -694,8 +800,141 @@ class DataService {
     }
   }
 
+  // --- FAST SYNCHRONOUS CACHE GETTERS (ZERO MS RENDER ON REFRESH) ---
+  public getCachedProfiles(): UserProfile[] {
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.PROFILES);
+      const result: UserProfile[] = local ? JSON.parse(local) : INITIAL_PROFILES;
+      return result.map((p) => {
+        if (
+          p.id === 'user-staff-2' ||
+          p.full_name?.toLowerCase().includes('budi santoso') ||
+          p.id === 'user-1791788423659' ||
+          p.full_name?.toLowerCase().includes('andi saputra')
+        ) {
+          return { ...p, role: 'admin' as const, position: p.position || 'Administrator Laboratorium / ATLM' };
+        }
+        return p;
+      });
+    } catch (e) {
+      return INITIAL_PROFILES;
+    }
+  }
+
+  public getCachedShifts(): Shift[] {
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.SHIFTS);
+      return local ? JSON.parse(local) : INITIAL_SHIFTS;
+    } catch (e) {
+      return INITIAL_SHIFTS;
+    }
+  }
+
+  public getCachedCategories(): HandoverCategory[] {
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+      return local ? JSON.parse(local) : INITIAL_CATEGORIES;
+    } catch (e) {
+      return INITIAL_CATEGORIES;
+    }
+  }
+
+  public getCachedAssignments(filters?: { date?: string; month?: string; profileId?: string }): ShiftAssignment[] {
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS);
+      let assignments: ShiftAssignment[] = local ? JSON.parse(local) : INITIAL_ASSIGNMENTS;
+      if (!assignments || assignments.length === 0) {
+        assignments = INITIAL_ASSIGNMENTS;
+      }
+      const allShifts = this.getCachedShifts();
+      const allProfiles = this.getCachedProfiles();
+      assignments = assignments.map((a) => ({
+        ...a,
+        shift: a.shift || allShifts.find((s) => s.id === a.shift_id),
+        profile: a.profile || allProfiles.find((p) => p.id === a.profile_id),
+      }));
+
+      if (filters?.date) {
+        assignments = assignments.filter((a) => a.shift_date === filters.date);
+      }
+      if (filters?.month) {
+        assignments = assignments.filter((a) => a.shift_date.startsWith(filters.month!));
+      }
+      if (filters?.profileId) {
+        assignments = assignments.filter((a) => a.profile_id === filters.profileId);
+      }
+      return assignments;
+    } catch (e) {
+      return INITIAL_ASSIGNMENTS;
+    }
+  }
+
+  public getCachedHandovers(filters?: { date?: string; status?: string }): Handover[] {
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.HANDOVERS);
+      let handovers: Handover[] = local ? JSON.parse(local) : INITIAL_HANDOVERS;
+      if (!handovers || handovers.length === 0) {
+        handovers = INITIAL_HANDOVERS;
+      }
+
+      // Filter out permanently deleted handover IDs
+      try {
+        const deletedIds = JSON.parse(localStorage.getItem('shift_atlm_deleted_handovers') || '[]');
+        if (deletedIds.length > 0) {
+          handovers = handovers.filter((h) => !deletedIds.includes(h.id));
+        }
+      } catch (e) {}
+
+      const allShifts = this.getCachedShifts();
+      const allProfiles = this.getCachedProfiles();
+      handovers = handovers.map((h) => ({
+        ...h,
+        shift_from: h.shift_from || allShifts.find((s) => s.id === h.shift_from_id),
+        shift_to: h.shift_to || allShifts.find((s) => s.id === h.shift_to_id),
+        giver: h.giver || allProfiles.find((p) => p.id === h.giver_profile_id),
+        receiver: h.receiver || allProfiles.find((p) => p.id === h.receiver_profile_id),
+      }));
+
+      if (filters?.date) {
+        handovers = handovers.filter((h) => h.shift_date === filters.date);
+      }
+      if (filters?.status) {
+        handovers = handovers.filter((h) => h.status === filters.status);
+      }
+      return handovers;
+    } catch (e) {
+      return INITIAL_HANDOVERS;
+    }
+  }
+
+  public getCachedShiftSwaps(): ShiftSwap[] {
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.SHIFT_SWAPS);
+      let swaps: ShiftSwap[] = local ? JSON.parse(local) : [];
+      const allShifts = this.getCachedShifts();
+      const allProfiles = this.getCachedProfiles();
+      return swaps.map((s) => ({
+        ...s,
+        shift: s.shift || allShifts.find((sh) => sh.id === s.shift_id),
+        requester: s.requester || allProfiles.find((p) => p.id === s.requester_id),
+        target_profile: s.target_profile || allProfiles.find((p) => p.id === s.target_profile_id),
+      }));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  public getCachedPendingTasks(): PendingTask[] {
+    try {
+      const local = localStorage.getItem(STORAGE_KEYS.PENDING_TASKS);
+      return local ? JSON.parse(local) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
   // --- REALTIME SUBSCRIPTIONS & BROADCAST ---
-  private setupRealtimeSync() {
+  public setupRealtimeSync() {
     if (!this.isSupabaseAvailable()) {
       this.updateStatus({
         connected: false,
@@ -703,6 +942,13 @@ class DataService {
         error: 'Supabase credentials not configured',
       });
       return;
+    }
+
+    if (this.realtimeChannel) {
+      try {
+        supabase.removeChannel(this.realtimeChannel);
+      } catch (e) {}
+      this.realtimeChannel = null;
     }
 
     try {
@@ -748,7 +994,7 @@ class DataService {
         }
       );
 
-      // 3. Subscribe to the channel
+      // 3. Subscribe to the channel with auto-reconnection
       this.realtimeChannel.subscribe((status: string, err: any) => {
         console.log('[Supabase Realtime Channel Status]:', status, err || '');
         if (status === 'SUBSCRIBED') {
@@ -758,12 +1004,15 @@ class DataService {
             lastSynced: new Date(),
             error: null,
           });
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          // Resync all data whenever channel subscribes
+          this.syncAllFromRemote();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           this.updateStatus({
             connected: false,
             channelStatus: status as any,
             error: err?.message || `Koneksi realtime ${status.toLowerCase()}`,
           });
+          this.scheduleReconnect();
         } else {
           this.updateStatus({
             channelStatus: status as any,
@@ -777,6 +1026,112 @@ class DataService {
         channelStatus: 'CHANNEL_ERROR',
         error: e.message || 'Gagal menginisialisasi realtime',
       });
+      this.scheduleReconnect();
+    }
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      console.log('Attempting to reconnect Supabase Realtime...');
+      this.setupRealtimeSync();
+    }, 3500);
+  }
+
+  public reconnectAndSync() {
+    this.setupRealtimeSync();
+    this.syncAllFromRemote();
+  }
+
+  /**
+   * Sync all tables from Supabase into localStorage in the background
+   */
+  public async syncAllFromRemote(): Promise<void> {
+    if (!this.isSupabaseAvailable()) return;
+
+    try {
+      const [
+        profsRes,
+        shiftsRes,
+        assignsRes,
+        hoRes,
+        swapsRes,
+        tasksRes,
+        catsRes,
+      ] = await Promise.allSettled([
+        supabase.from('profiles').select('*').order('full_name'),
+        supabase.from('shifts').select('*').order('start_time'),
+        supabase.from('shift_assignments').select('*'),
+        supabase.from('handovers').select('*').order('created_at', { ascending: false }),
+        supabase.from('shift_swaps').select('*').order('created_at', { ascending: false }),
+        supabase.from('pending_tasks').select('*'),
+        supabase.from('handover_categories').select('*').order('sort_order'),
+      ]);
+
+      let hasChanges = false;
+
+      if (profsRes.status === 'fulfilled' && !profsRes.value.error && profsRes.value.data && profsRes.value.data.length > 0) {
+        const enforced = profsRes.value.data.map((p: UserProfile) => {
+          if (
+            p.id === 'user-staff-2' ||
+            p.full_name?.toLowerCase().includes('budi santoso') ||
+            p.id === 'user-1791788423659' ||
+            p.full_name?.toLowerCase().includes('andi saputra')
+          ) {
+            return { ...p, role: 'admin' as const, position: p.position || 'Administrator Laboratorium / ATLM' };
+          }
+          return p;
+        });
+        this.safeLocalStorageSet(STORAGE_KEYS.PROFILES, JSON.stringify(enforced));
+        hasChanges = true;
+      }
+
+      if (shiftsRes.status === 'fulfilled' && !shiftsRes.value.error && shiftsRes.value.data && shiftsRes.value.data.length > 0) {
+        this.safeLocalStorageSet(STORAGE_KEYS.SHIFTS, JSON.stringify(shiftsRes.value.data));
+        hasChanges = true;
+      }
+
+      if (assignsRes.status === 'fulfilled' && !assignsRes.value.error && assignsRes.value.data) {
+        if (assignsRes.value.data.length > 0) {
+          this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(assignsRes.value.data));
+          hasChanges = true;
+        }
+      }
+
+      if (hoRes.status === 'fulfilled' && !hoRes.value.error && hoRes.value.data) {
+        let freshHo = hoRes.value.data;
+        try {
+          const deletedIds = JSON.parse(localStorage.getItem('shift_atlm_deleted_handovers') || '[]');
+          if (deletedIds.length > 0) {
+            freshHo = freshHo.filter((h: any) => !deletedIds.includes(h.id));
+          }
+        } catch (e) {}
+        this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(freshHo));
+        hasChanges = true;
+      }
+
+      if (swapsRes.status === 'fulfilled' && !swapsRes.value.error && swapsRes.value.data) {
+        this.safeLocalStorageSet(STORAGE_KEYS.SHIFT_SWAPS, JSON.stringify(swapsRes.value.data));
+        hasChanges = true;
+      }
+
+      if (tasksRes.status === 'fulfilled' && !tasksRes.value.error && tasksRes.value.data) {
+        this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify(tasksRes.value.data));
+        hasChanges = true;
+      }
+
+      if (catsRes.status === 'fulfilled' && !catsRes.value.error && catsRes.value.data && catsRes.value.data.length > 0) {
+        this.safeLocalStorageSet(STORAGE_KEYS.CATEGORIES, JSON.stringify(catsRes.value.data));
+        hasChanges = true;
+      }
+
+      if (hasChanges) {
+        this.updateStatus({ connected: true, lastSynced: new Date() });
+        this.notifyListeners({ table: 'ALL', action: 'SYNC' });
+      }
+    } catch (e) {
+      console.warn('Error in syncAllFromRemote:', e);
     }
   }
 
@@ -839,21 +1194,29 @@ class DataService {
   private async handleRemoteChange(table: string, action: any, data: any) {
     this.updateStatus({ lastSynced: new Date() });
 
-    // Sync remote data into local storage cache
-    if (table === 'profiles') {
-      await this.getProfiles(true);
-    } else if (table === 'shift_assignments') {
-      await this.getAssignments(undefined, true);
-    } else if (table === 'handovers') {
-      await this.getHandovers(undefined, true);
-    } else if (table === 'pending_tasks') {
-      await this.getPendingTasks(undefined, true);
-    } else if (table === 'shift_swaps') {
-      await this.getShiftSwaps(true);
-    } else if (table === 'shifts') {
-      await this.getShifts(true);
+    // Instantly notify listeners so UI can react without waiting for network
+    this.notifyListeners({ table, action: (action || 'SYNC') as any, data });
+
+    // Sync remote data into local storage cache in the background
+    try {
+      if (table === 'profiles') {
+        await this.getProfiles(true);
+      } else if (table === 'shift_assignments') {
+        await this.getAssignments(undefined, true);
+      } else if (table === 'handovers') {
+        await this.getHandovers(undefined, true);
+      } else if (table === 'pending_tasks') {
+        await this.getPendingTasks(undefined, true);
+      } else if (table === 'shift_swaps') {
+        await this.getShiftSwaps(true);
+      } else if (table === 'shifts') {
+        await this.getShifts(true);
+      }
+    } catch (e) {
+      console.warn('Error in handleRemoteChange background sync:', e);
     }
 
+    // Notify listeners again after full relations are cached
     this.notifyListeners({ table, action: (action || 'SYNC') as any, data });
   }
 
@@ -948,7 +1311,9 @@ class DataService {
     }
 
     // Trigger initial background sync with Supabase
-    this.seedSupabaseIfEmpty();
+    this.seedSupabaseIfEmpty().then(() => {
+      this.syncAllFromRemote();
+    });
   }
 
   /**
@@ -988,6 +1353,50 @@ class DataService {
       if (!catErr && catData && catData.length === 0) {
         console.log('Seeding initial categories to Supabase...');
         await supabase.from('handover_categories').upsert(INITIAL_CATEGORIES);
+      }
+
+      // 4. Check shift_assignments
+      const { data: assignData, error: assignErr } = await supabase.from('shift_assignments').select('id').limit(1);
+      if (!assignErr && assignData && assignData.length === 0) {
+        console.log('Seeding initial shift_assignments to Supabase...');
+        const local = localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS);
+        const toSeed = local ? JSON.parse(local) : INITIAL_ASSIGNMENTS;
+        if (toSeed && toSeed.length > 0) {
+          const cleanAssignments = toSeed.map((a: any) => ({
+            id: a.id,
+            profile_id: a.profile_id,
+            shift_id: a.shift_id,
+            shift_date: a.shift_date,
+            notes: a.notes || null,
+            status: a.status || 'scheduled',
+          }));
+          await supabase.from('shift_assignments').upsert(cleanAssignments);
+        }
+      }
+
+      // 5. Check handovers
+      const { data: hoData, error: hoErr } = await supabase.from('handovers').select('id').limit(1);
+      if (!hoErr && hoData && hoData.length === 0) {
+        console.log('Seeding initial handovers to Supabase...');
+        const local = localStorage.getItem(STORAGE_KEYS.HANDOVERS);
+        const toSeedHo = local ? JSON.parse(local) : INITIAL_HANDOVERS;
+        if (toSeedHo && toSeedHo.length > 0) {
+          const cleanHo = toSeedHo.map((h: any) => ({
+            id: h.id,
+            shift_date: h.shift_date,
+            shift_from_id: h.shift_from_id,
+            shift_to_id: h.shift_to_id,
+            giver_profile_id: h.giver_profile_id,
+            receiver_profile_id: h.receiver_profile_id,
+            general_notes: h.general_notes || '',
+            urgent_notes: h.urgent_notes || '',
+            equipment_notes: h.equipment_notes || '',
+            status: h.status || 'pending',
+            created_at: h.created_at || new Date().toISOString(),
+            categories_data: h.categories_data || {},
+          }));
+          await supabase.from('handovers').upsert(cleanHo);
+        }
       }
 
       // Ensure Budi and Andi Saputra are updated to admin role in Supabase profiles
@@ -1224,54 +1633,47 @@ class DataService {
     },
     forceRefresh = false
   ): Promise<ShiftAssignment[]> {
-    let assignments: ShiftAssignment[] = [];
+    // 1. Instant return from local cache if available and not forced
+    const cached = this.getCachedAssignments(filters);
 
     if (this.isSupabaseAvailable()) {
       try {
         let query = supabase.from('shift_assignments').select('*');
-        if (filters?.date) query = query.eq('shift_date', filters.date);
-        if (filters?.profileId) query = query.eq('profile_id', filters.profileId);
+        if (filters?.date) {
+          query = query.eq('shift_date', filters.date);
+        } else if (filters?.month) {
+          query = query.gte('shift_date', `${filters.month}-01`).lte('shift_date', `${filters.month}-31`);
+        }
+        if (filters?.profileId) {
+          query = query.eq('profile_id', filters.profileId);
+        }
+
         const { data, error } = await query;
-        if (!error && data) {
-          assignments = data;
-          if (!filters?.date && !filters?.profileId && !filters?.month) {
-            this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(data));
-          }
+        if (!error && data && data.length > 0) {
+          try {
+            const local = localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS);
+            const currentAll: ShiftAssignment[] = local ? JSON.parse(local) : [];
+            const merged = [...currentAll];
+            data.forEach((item: ShiftAssignment) => {
+              const idx = merged.findIndex((m) => m.id === item.id);
+              if (idx >= 0) merged[idx] = item;
+              else merged.push(item);
+            });
+            this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(merged));
+          } catch (e) {}
+          return this.getCachedAssignments(filters);
         }
       } catch (e) {
         console.warn('Fallback to local assignments:', e);
       }
     }
 
-    if (assignments.length === 0) {
-      const local = localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS);
-      assignments = local ? JSON.parse(local) : INITIAL_ASSIGNMENTS;
-      if (assignments.length === 0) {
-        assignments = INITIAL_ASSIGNMENTS;
-        this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(INITIAL_ASSIGNMENTS));
-      }
+    if (cached.length > 0) {
+      return cached;
     }
 
-    // Attach shift & profile details
-    const [allShifts, allProfiles] = await Promise.all([this.getShifts(), this.getProfiles()]);
-    assignments = assignments.map((a) => ({
-      ...a,
-      shift: a.shift || allShifts.find((s) => s.id === a.shift_id),
-      profile: a.profile || allProfiles.find((p) => p.id === a.profile_id),
-    }));
-
-    // Apply filters
-    if (filters?.date) {
-      assignments = assignments.filter((a) => a.shift_date === filters.date);
-    }
-    if (filters?.month) {
-      assignments = assignments.filter((a) => a.shift_date.startsWith(filters.month!));
-    }
-    if (filters?.profileId) {
-      assignments = assignments.filter((a) => a.profile_id === filters.profileId);
-    }
-
-    return assignments;
+    // Default fallback to initial assignments
+    return this.getCachedAssignments(filters);
   }
 
   public async saveAssignment(assignment: ShiftAssignment): Promise<{ success: boolean; conflict?: string }> {
@@ -1410,8 +1812,27 @@ class DataService {
         const { data, error } = await query;
         if (!error && data && data.length > 0) {
           handovers = data;
+          let filtered = data;
+          try {
+            const deletedIds = JSON.parse(localStorage.getItem('shift_atlm_deleted_handovers') || '[]');
+            if (deletedIds.length > 0) {
+              filtered = filtered.filter((h: any) => !deletedIds.includes(h.id));
+            }
+          } catch (e) {}
           if (!filters?.date && !filters?.status) {
-            this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(data));
+            this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(filtered));
+          } else {
+            try {
+              const local = localStorage.getItem(STORAGE_KEYS.HANDOVERS);
+              const currentAll: Handover[] = local ? JSON.parse(local) : [];
+              const merged = [...currentAll];
+              filtered.forEach((item: Handover) => {
+                const idx = merged.findIndex((m) => m.id === item.id);
+                if (idx >= 0) merged[idx] = item;
+                else merged.push(item);
+              });
+              this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(merged));
+            } catch (e) {}
           }
         }
       } catch (e) {

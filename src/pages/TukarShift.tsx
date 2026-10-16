@@ -40,11 +40,11 @@ export default function TukarShift() {
   const { showToast } = useToast();
   const navigate = useNavigate();
 
-  const [swaps, setSwaps] = useState<ShiftSwap[]>([]);
-  const [profiles, setProfiles] = useState<UserProfile[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [allAssignments, setAllAssignments] = useState<ShiftAssignment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [swaps, setSwaps] = useState<ShiftSwap[]>(() => dataService.getCachedShiftSwaps());
+  const [profiles, setProfiles] = useState<UserProfile[]>(() => dataService.getCachedProfiles());
+  const [shifts, setShifts] = useState<Shift[]>(() => dataService.getCachedShifts());
+  const [allAssignments, setAllAssignments] = useState<ShiftAssignment[]>(() => dataService.getCachedAssignments());
+  const [loading, setLoading] = useState(false);
 
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
@@ -58,8 +58,10 @@ export default function TukarShift() {
     reason: '',
   });
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (forceSpinner = false) => {
+    if (swaps.length === 0 || forceSpinner) {
+      setLoading(true);
+    }
     try {
       const [allSwaps, allProfiles, allShifts, assignmentsData] = await Promise.all([
         dataService.getShiftSwaps(),

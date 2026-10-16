@@ -36,20 +36,24 @@ export default function JadwalShift() {
   const { activeProfile, isAdmin } = useAuth();
   const { showToast } = useToast();
 
-  const [assignments, setAssignments] = useState<ShiftAssignment[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [profiles, setProfiles] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [assignments, setAssignments] = useState<ShiftAssignment[]>(() => {
+    const today = new Date();
+    const curMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    return dataService.getCachedAssignments({ month: curMonth });
+  });
+  const [shifts, setShifts] = useState<Shift[]>(() => dataService.getCachedShifts());
+  const [profiles, setProfiles] = useState<UserProfile[]>(() => dataService.getCachedProfiles());
+  const [loading, setLoading] = useState(false);
 
   // View mode: 'list' | 'calendar' | 'matrix'
   const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'matrix'>('list');
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState(() => {
-    const today = new Date();
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  });
   const [selectedStaffFilter, setSelectedStaffFilter] = useState<string>('all');
   const [selectedShiftFilter, setSelectedShiftFilter] = useState<string>('all');
 
@@ -242,8 +246,10 @@ export default function JadwalShift() {
     playAlarmSound('holiday');
   };
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (forceSpinner = false) => {
+    if (assignments.length === 0 || forceSpinner) {
+      setLoading(true);
+    }
     try {
       const [allAssignments, allShifts, allProfiles] = await Promise.all([
         dataService.getAssignments({ month: selectedMonth }),
@@ -278,6 +284,11 @@ export default function JadwalShift() {
   };
 
   useEffect(() => {
+    // Immediately pull cached assignments for selectedMonth in 0ms
+    const cached = dataService.getCachedAssignments({ month: selectedMonth });
+    if (cached.length > 0) {
+      setAssignments(cached);
+    }
     loadData();
 
     // Subscribe to realtime updates across all devices

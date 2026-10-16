@@ -28,8 +28,13 @@ import { playAlarmSound } from '../utils/alarmSound';
 export function NotificationBell() {
   const { activeProfile, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [swaps, setSwaps] = useState<ShiftSwap[]>([]);
-  const [pendingHandovers, setPendingHandovers] = useState<Handover[]>([]);
+  const [swaps, setSwaps] = useState<ShiftSwap[]>(() => dataService.getCachedShiftSwaps());
+  const [pendingHandovers, setPendingHandovers] = useState<Handover[]>(() => {
+    const allHo = dataService.getCachedHandovers();
+    return allHo.filter(
+      (h) => h.status === 'pending' && (isAdmin || h.receiver_profile_id === activeProfile?.id)
+    );
+  });
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'reminders' | 'approved' | 'pending'>('all');
   const dropdownRef = useRef<HTMLDivElement>(null);

@@ -60,15 +60,22 @@ export default function SerahTerima() {
   const [searchParams, setSearchParams] = useSearchParams();
   const handoverIdParam = searchParams.get('id');
 
-  const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState<HandoverCategory[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [profiles, setProfiles] = useState<UserProfile[]>([]);
-  const [allHandovers, setAllHandovers] = useState<Handover[]>([]);
-  const [assignments, setAssignments] = useState<ShiftAssignment[]>([]);
+  const [categories, setCategories] = useState<HandoverCategory[]>(() => dataService.getCachedCategories());
+  const [shifts, setShifts] = useState<Shift[]>(() => dataService.getCachedShifts());
+  const [profiles, setProfiles] = useState<UserProfile[]>(() => dataService.getCachedProfiles());
+  const [allHandovers, setAllHandovers] = useState<Handover[]>(() => dataService.getCachedHandovers());
+  const [assignments, setAssignments] = useState<ShiftAssignment[]>(() => dataService.getCachedAssignments());
+  const [loading, setLoading] = useState(false);
 
   // Navigation tab: 'masuk' (Operan Masuk) | 'form' (Formulir Serah Terima) | 'riwayat' (Data & Riwayat)
-  const [activeTab, setActiveTab] = useState<'masuk' | 'form' | 'riwayat'>('masuk');
+  const [activeTab, setActiveTab] = useState<'masuk' | 'form' | 'riwayat'>(() => {
+    if (handoverIdParam) return 'form';
+    const cachedHo = dataService.getCachedHandovers();
+    const pendingForMe = cachedHo.filter(
+      (h) => h.status === 'pending' && (isAdmin || h.receiver_profile_id === activeProfile.id)
+    );
+    return pendingForMe.length > 0 ? 'masuk' : 'form';
+  });
 
   // Active Handover State
   const [currentHandoverId, setCurrentHandoverId] = useState<string>(() => {
@@ -77,10 +84,13 @@ export default function SerahTerima() {
 
   // 1. Identitas Serah Terima
   const [shiftDate, setShiftDate] = useState(getPontianakDateString());
-  const [shiftFromId, setShiftFromId] = useState('');
-  const [shiftToId, setShiftToId] = useState('');
+  const [shiftFromId, setShiftFromId] = useState(() => dataService.getCachedShifts()[0]?.id || '');
+  const [shiftToId, setShiftToId] = useState(() => dataService.getCachedShifts()[1]?.id || '');
   const [giverProfileId, setGiverProfileId] = useState(activeProfile.id);
-  const [receiverProfileId, setReceiverProfileId] = useState('');
+  const [receiverProfileId, setReceiverProfileId] = useState(() => {
+    const others = dataService.getCachedProfiles().filter((p) => p.id !== activeProfile.id);
+    return others[0]?.id || '';
+  });
   const [givenAtTime, setGivenAtTime] = useState(getPontianakTimeString());
   const [receivedAtTime, setReceivedAtTime] = useState('');
   const [handoverStatus, setHandoverStatus] = useState<HandoverStatus>('draft');
@@ -114,7 +124,22 @@ export default function SerahTerima() {
   }, [assignments, shiftDate, shiftToId, profiles]);
 
   // 2. Kategori Pemeriksaan Pasien (17 Kategori)
-  const [categoryDataMap, setCategoryDataMap] = useState<Record<string, HandoverCategoryData>>({});
+  const [categoryDataMap, setCategoryDataMap] = useState<Record<string, HandoverCategoryData>>(() => {
+    const cachedCats = dataService.getCachedCategories();
+    const initialMap: Record<string, HandoverCategoryData> = {};
+    cachedCats.forEach((c) => {
+      initialMap[c.id] = {
+        category_id: c.id,
+        patient_count: 0,
+        ongoing_tests: '',
+        pending_samples: '',
+        unverified_results: '',
+        issues_notes: '',
+        work_status: 'selesai',
+      };
+    });
+    return initialMap;
+  });
   const [expandedCategoryId, setExpandedCategoryId] = useState<string | null>('cat-1');
 
   // 3. Kondisi Laboratorium & Alat
@@ -292,7 +317,9 @@ export default function SerahTerima() {
   // Load initial references & handover data
   useEffect(() => {
     const initData = async () => {
-      setLoading(true);
+      if (categories.length === 0 || allHandovers.length === 0) {
+        setLoading(true);
+      }
       try {
         const [cats, sList, pList, allHo, allAsg] = await Promise.all([
           dataService.getCategories(),
@@ -307,15 +334,17 @@ export default function SerahTerima() {
         setAllHandovers(allHo);
         setAssignments(allAsg);
 
-        // Default shifts
+        // Default shifts if not set
         if (sList.length >= 2) {
-          setShiftFromId(sList[0].id);
-          setShiftToId(sList[1].id);
+          setShiftFromId((prev) => prev || sList[0].id);
+          setShiftToId((prev) => prev || sList[1].id);
         }
 
-        // Default receiver
+        // Default receiver if not set
         const otherStaff = pList.find((p) => p.id !== activeProfile.id);
-        if (otherStaff) setReceiverProfileId(otherStaff.id);
+        if (otherStaff) {
+          setReceiverProfileId((prev) => prev || otherStaff.id);
+        }
 
         // Check if loading existing handover from URL query
         if (handoverIdParam) {
@@ -325,31 +354,24 @@ export default function SerahTerima() {
             setActiveTab('form');
           }
         } else {
-          // If there are pending handovers for the active user, start on 'masuk' tab
-          const pendingForMe = allHo.filter(
-            (h) => h.status === 'pending' && (isAdmin || h.receiver_profile_id === activeProfile.id)
-          );
-          if (pendingForMe.length > 0) {
-            setActiveTab('masuk');
-          } else {
-            // Default to 'form' if no pending
-            setActiveTab('form');
-          }
-
-          // Initialize empty categories map for new form
-          const initialMap: Record<string, HandoverCategoryData> = {};
-          cats.forEach((c) => {
-            initialMap[c.id] = {
-              category_id: c.id,
-              patient_count: 0,
-              ongoing_tests: '',
-              pending_samples: '',
-              unverified_results: '',
-              issues_notes: '',
-              work_status: 'selesai',
-            };
+          // Initialize categories map for new form if empty
+          setCategoryDataMap((prev) => {
+            const initialMap: Record<string, HandoverCategoryData> = { ...prev };
+            cats.forEach((c) => {
+              if (!initialMap[c.id]) {
+                initialMap[c.id] = {
+                  category_id: c.id,
+                  patient_count: 0,
+                  ongoing_tests: '',
+                  pending_samples: '',
+                  unverified_results: '',
+                  issues_notes: '',
+                  work_status: 'selesai',
+                };
+              }
+            });
+            return initialMap;
           });
-          setCategoryDataMap(initialMap);
         }
       } catch (err) {
         console.error('Error initializing handover:', err);
@@ -706,7 +728,7 @@ export default function SerahTerima() {
         {/* Action button: Buat Baru */}
         <div className="flex items-center gap-2 self-start md:self-auto">
           <button
-            onClick={handleCreateNewHandover}
+            onClick={() => handleCreateNewHandover()}
             className="flex items-center gap-1.5 bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all min-h-[44px]"
           >
             <Plus className="w-4 h-4" />
@@ -1056,7 +1078,7 @@ export default function SerahTerima() {
               </p>
               <div className="pt-2 flex justify-center gap-2">
                 <button
-                  onClick={handleCreateNewHandover}
+                  onClick={() => handleCreateNewHandover()}
                   className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow transition"
                 >
                   Buat Serah Terima Baru

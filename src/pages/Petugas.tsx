@@ -26,8 +26,8 @@ export default function Petugas() {
   const { activeProfile, isAdmin, canSimulate, switchProfile, refreshProfiles } = useAuth();
   const { showToast } = useToast();
 
-  const [profiles, setProfiles] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [profiles, setProfiles] = useState<UserProfile[]>(() => dataService.getCachedProfiles());
+  const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
@@ -44,8 +44,10 @@ export default function Petugas() {
     is_active: true,
   });
 
-  const loadProfiles = async () => {
-    setLoading(true);
+  const loadProfiles = async (forceSpinner = false) => {
+    if (profiles.length === 0 || forceSpinner) {
+      setLoading(true);
+    }
     try {
       const data = await dataService.getProfiles();
       setProfiles(data);

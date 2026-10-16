@@ -26,7 +26,13 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { dataService, getPontianakDateString, getPontianakTimeString } from '../services/dataService';
+import {
+  dataService,
+  getPontianakDateString,
+  getPontianakTimeString,
+  getCurrentDutyShiftInfo,
+  ActiveDutyInfo,
+} from '../services/dataService';
 import { ShiftAssignment, Shift, UserProfile } from '../types';
 import { Avatar } from './Avatar';
 import { playAlarmSound } from '../utils/alarmSound';
@@ -39,13 +45,14 @@ export function TodayShiftAlarmModal() {
   const [todayAssignment, setTodayAssignment] = useState<ShiftAssignment | null>(null);
   const [shiftPartners, setShiftPartners] = useState<ShiftAssignment[]>([]);
   const [currentActiveShift, setCurrentActiveShift] = useState<Shift | null>(null);
+  const [currentDutyInfo, setCurrentDutyInfo] = useState<ActiveDutyInfo | null>(null);
   const [currentDutyStaff, setCurrentDutyStaff] = useState<ShiftAssignment[]>([]);
   const [currentDinasLuarStaff, setCurrentDinasLuarStaff] = useState<ShiftAssignment[]>([]);
   const [isShiftFinished, setIsShiftFinished] = useState(false);
   const [isHoliday, setIsHoliday] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Active view tab in modal: 'finished_or_current' | 'my_shift' | 'holiday'
+  // Active view tab in modal: 'current_duty' | 'my_shift' | 'holiday'
   const [activeTab, setActiveTab] = useState<'current_duty' | 'my_shift' | 'holiday'>('current_duty');
 
   const todayStr = getPontianakDateString();
@@ -63,25 +70,9 @@ export function TodayShiftAlarmModal() {
       return curMin >= endMin;
     } else {
       // Overnight shift (e.g. 21:00 to 07:00)
+      // Ended between 07:00 and 21:00
       return curMin >= endMin && curMin < startMin;
     }
-  };
-
-  // Helper to find which shift is currently operating right now
-  const findCurrentOperatingShift = (shifts: Shift[], curMin: number): Shift | null => {
-    for (const s of shifts) {
-      const [sh, sm] = s.start_time.split(':').map(Number);
-      const [eh, em] = s.end_time.split(':').map(Number);
-      const startMin = sh * 60 + (sm || 0);
-      const endMin = eh * 60 + (em || 0);
-
-      if (endMin > startMin) {
-        if (curMin >= startMin && curMin < endMin) return s;
-      } else {
-        if (curMin >= startMin || curMin < endMin) return s;
-      }
-    }
-    return shifts[0] || null;
   };
 
   const checkTodayStatus = async () => {
@@ -101,31 +92,26 @@ export function TodayShiftAlarmModal() {
       const assignments = [...assignmentsToday, ...assignmentsYesterday];
 
       const [curH, curM] = getPontianakTimeString().split(':').map(Number);
-      const curMinutes = curH * 60 + (curM || 0);
+      const curMinutes = (isNaN(curH) ? 0 : curH) * 60 + (isNaN(curM) ? 0 : curM);
 
-      // Determine the shift running right now
-      const operatingShift = findCurrentOperatingShift(shifts, curMinutes);
-      setCurrentActiveShift(operatingShift);
+      // Determine operating active shift and duty date
+      // During 21.00 - 07.00 across midnight (00:00 - 06:59), dutyDate is yesterdayStr
+      // ensuring the on-duty staff shown are the ones from 21.00 yesterday, not tomorrow/tonight
+      const dutyInfo = getCurrentDutyShiftInfo(shifts);
+      setCurrentDutyInfo(dutyInfo);
+      setCurrentActiveShift(dutyInfo.activeShift);
 
       // Staff currently on duty for the active shift
-      if (operatingShift) {
+      if (dutyInfo.activeShift) {
         const onDuty = assignments.filter((a) => {
-          if (a.shift_id !== operatingShift.id || a.status === 'cancelled') return false;
-          
-          const [sh] = operatingShift.start_time.split(':').map(Number);
-          // If shift is overnight (starts 21:00), and current time is 01:00, 
-          // the assignment date must be yesterday.
-          const isOvernight = sh >= 18; // Assuming 18:00+ starts overnight
-          const [curH] = getPontianakTimeString().split(':').map(Number);
-          
-          const expectedDate = (isOvernight && curH < 12) ? yesterdayStr : todayStr;
-          return a.shift_date === expectedDate;
+          if (a.shift_id !== dutyInfo.activeShift!.id || a.status === 'cancelled') return false;
+          return a.shift_date === dutyInfo.dutyDate;
         });
         setCurrentDutyStaff(onDuty);
       }
 
       // Filter dinas luar staff today
-      const dinasLuar = assignments.filter((a) => {
+      const dinasLuar = assignmentsToday.filter((a) => {
         if (a.status === 'cancelled') return false;
         const shiftName = (a.shift?.name || '').toLowerCase();
         const shiftCode = (a.shift?.code || '').toLowerCase();
@@ -139,27 +125,58 @@ export function TodayShiftAlarmModal() {
       });
       setCurrentDinasLuarStaff(dinasLuar);
 
-      // Check current user's assignment today or yesterday for overnight shifts
-      const mine = assignments.find((a) => {
-        if (a.profile_id !== activeProfile.id || a.status === 'cancelled') return false;
-        
-        // Use the same logic to determine expected date as for onDuty staff
-        const [sh] = (a.shift?.start_time || '00:00').split(':').map(Number);
-        const isOvernight = sh >= 18;
-        const [curH] = getPontianakTimeString().split(':').map(Number);
-        const expectedDate = (isOvernight && curH < 12) ? yesterdayStr : todayStr;
-        
-        return a.shift_date === expectedDate;
-      });
-      setTodayAssignment(mine || null);
+      // 1. Check if user is currently working yesterday's overnight night shift (between 00:00 and 06:59)
+      const myOngoingYesterdayNightShift = dutyInfo.isNightShiftPostMidnight
+        ? assignmentsYesterday.find(
+            (a) =>
+              a.profile_id === activeProfile.id &&
+              a.shift_date === yesterdayStr &&
+              a.status !== 'cancelled' &&
+              (a.shift_id === dutyInfo.activeShift?.id || a.shift?.code === 'MALAM')
+          )
+        : null;
 
-      if (mine && mine.shift) {
-        const finished = checkHasShiftEnded(mine.shift, curMinutes);
-        setIsShiftFinished(finished);
+      // 2. Check if user is scheduled for ANY shift today (on todayStr)
+      const myAssignmentToday = assignmentsToday.find(
+        (a) => a.profile_id === activeProfile.id && a.shift_date === todayStr && a.status !== 'cancelled'
+      );
+
+      if (myOngoingYesterdayNightShift && myOngoingYesterdayNightShift.shift) {
+        // User is currently actively in the middle of overnight duty until 07:00
+        setTodayAssignment(myOngoingYesterdayNightShift);
+        setIsShiftFinished(false);
         setIsHoliday(false);
 
-        const partners = assignments.filter(
-          (a) => a.shift_id === mine.shift_id && a.profile_id !== activeProfile.id && a.status !== 'cancelled'
+        const partners = assignmentsYesterday.filter(
+          (a) =>
+            a.shift_date === yesterdayStr &&
+            a.shift_id === myOngoingYesterdayNightShift.shift_id &&
+            a.profile_id !== activeProfile.id &&
+            a.status !== 'cancelled'
+        );
+        setShiftPartners(partners);
+        setActiveTab('my_shift');
+
+        const activeStorageKey = `alarm_active_shown_${activeProfile.id}_${todayStr}`;
+        if (!sessionStorage.getItem(activeStorageKey)) {
+          setIsOpen(true);
+          sessionStorage.setItem(activeStorageKey, 'true');
+          playAlarmSound('shift_active');
+        }
+      } else if (myAssignmentToday && myAssignmentToday.shift) {
+        // User has a scheduled shift today (matches jadwal 100%)
+        setTodayAssignment(myAssignmentToday);
+        setIsHoliday(false);
+
+        const finished = checkHasShiftEnded(myAssignmentToday.shift, curMinutes);
+        setIsShiftFinished(finished);
+
+        const partners = assignmentsToday.filter(
+          (a) =>
+            a.shift_date === todayStr &&
+            a.shift_id === myAssignmentToday.shift_id &&
+            a.profile_id !== activeProfile.id &&
+            a.status !== 'cancelled'
         );
         setShiftPartners(partners);
 
@@ -182,8 +199,10 @@ export function TodayShiftAlarmModal() {
         }
       } else {
         // User has no assignment today -> Libur (Lepas Dinas)
+        setTodayAssignment(null);
         setIsShiftFinished(false);
         setIsHoliday(true);
+        setShiftPartners([]);
         setActiveTab('holiday');
       }
     } catch (e) {
@@ -412,14 +431,20 @@ export function TodayShiftAlarmModal() {
                 {currentActiveShift && (
                   <div className="text-right">
                     <span className="text-[11px] font-mono font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30 px-2.5 py-1 rounded-lg">
-                      {currentActiveShift.start_time.slice(0, 5)} - {currentActiveShift.end_time.slice(0, 5)} WIB
+                      {currentDutyInfo?.timeRangeDisplay || `${currentActiveShift.start_time.slice(0, 5)} - ${currentActiveShift.end_time.slice(0, 5)} WIB`}
                     </span>
                   </div>
                 )}
               </div>
               <p className="text-[11px] text-slate-400 mt-1.5">
-                {currentActiveShift?.description || 'Pelayanan operasional Laboratorium RSUD SMJ I'}
+                {currentDutyInfo?.descriptionText || currentActiveShift?.description || 'Pelayanan operasional Laboratorium RSUD SMJ I'}
               </p>
+              {currentDutyInfo?.isNightShiftPostMidnight && (
+                <div className="mt-2.5 pt-2 border-t border-slate-800 text-[11px] text-amber-300 flex items-center gap-1.5 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                  <span>Petugas yang terbaca adalah yang dinas pukul 21.00 (kemarin), bukan shift malam nanti malam.</span>
+                </div>
+              )}
             </div>
 
             {/* List of On-Duty Personnel Right Now */}
@@ -540,21 +565,46 @@ export function TodayShiftAlarmModal() {
               <div className="flex items-center justify-between text-xs text-slate-600">
                 <span className="flex items-center gap-1.5 font-semibold">
                   <Calendar className="w-4 h-4 text-teal-600" />
-                  Tanggal Dinas:
+                  Tanggal Shift:
                 </span>
-                <span className="font-mono font-bold text-slate-900">{todayStr}</span>
+                <span className="font-mono font-bold text-slate-900">
+                  {todayAssignment ? todayAssignment.shift_date : todayStr}
+                </span>
               </div>
 
               {todayAssignment && todayAssignment.shift ? (
-                <div className="flex items-center justify-between text-xs text-slate-600 pt-2 border-t border-slate-200">
-                  <span className="flex items-center gap-1.5 font-semibold">
-                    <Clock className="w-4 h-4 text-blue-600" />
-                    Jam Dinas Anda:
-                  </span>
-                  <span className="font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
-                    {todayAssignment.shift.start_time.slice(0, 5)} - {todayAssignment.shift.end_time.slice(0, 5)} WIB
-                  </span>
-                </div>
+                <>
+                  <div className="flex items-center justify-between text-xs text-slate-600 pt-2 border-t border-slate-200">
+                    <span className="flex items-center gap-1.5 font-semibold">
+                      <Clock className="w-4 h-4 text-blue-600" />
+                      Jadwal Shift Anda:
+                    </span>
+                    <span className="font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                      {todayAssignment.shift.name} ({todayAssignment.shift.start_time.slice(0, 5)} - {todayAssignment.shift.end_time.slice(0, 5)} WIB)
+                    </span>
+                  </div>
+                  {currentDutyInfo?.isNightShiftPostMidnight && todayAssignment.shift.code === 'MALAM' ? (
+                    <div className="text-[11px] text-teal-800 bg-teal-50 p-2 rounded-lg border border-teal-200 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse shrink-0" />
+                      <span>Anda sedang bertugas pada shift malam berjalan (mulai 21:00 kemarin s/d 07:00 pagi ini).</span>
+                    </div>
+                  ) : isShiftFinished ? (
+                    <div className="text-[11px] text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>Shift Anda untuk jadwal ini telah selesai bertugas.</span>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-emerald-800 bg-emerald-50 p-2 rounded-lg border border-emerald-200 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                      <span>Sesuai jadwal penugasan ATLM di aplikasi.</span>
+                    </div>
+                  )}
+                  {todayAssignment.notes && (
+                    <div className="text-[11px] text-slate-600 italic bg-white p-2 rounded-lg border border-slate-200">
+                      Catatan: {todayAssignment.notes}
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="pt-2 border-t border-slate-200 text-xs text-amber-700 font-medium">
                   Anda tidak memiliki jadwal dinas shift pada hari ini (Libur / Lepas Dinas).
