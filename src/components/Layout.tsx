@@ -18,6 +18,7 @@ import {
   Building2,
   RefreshCw,
   UserCheck,
+  MessageSquare,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakTimeString } from '../services/dataService';
@@ -112,6 +113,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     { to: '/jadwal', label: 'Jadwal Shift', icon: CalendarDays },
     { to: '/tukar-shift', label: 'Tukar Shift', icon: RefreshCw },
     { to: '/serah-terima', label: 'Serah Terima', icon: FileSpreadsheet, highlight: true },
+    { to: '/chat', label: 'Chat Lab', icon: MessageSquare, badge: 'Baru' },
     { to: '/petugas', label: 'Petugas', icon: Users },
     { to: '/riwayat', label: 'Riwayat', icon: History },
     { to: '/profil', label: 'Profil', icon: User },

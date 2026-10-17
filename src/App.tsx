@@ -21,6 +21,7 @@ const Petugas = lazy(() => import('./pages/Petugas'));
 const Riwayat = lazy(() => import('./pages/Riwayat'));
 const Profil = lazy(() => import('./pages/Profil'));
 const AdminSettings = lazy(() => import('./pages/AdminSettings'));
+const ChatLab = lazy(() => import('./pages/ChatLab'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -57,6 +58,7 @@ function AppContent() {
           <Route path="/jadwal" element={<JadwalShift />} />
           <Route path="/tukar-shift" element={<TukarShift />} />
           <Route path="/serah-terima" element={<SerahTerima />} />
+          <Route path="/chat" element={<ChatLab />} />
           <Route path="/petugas" element={<Petugas />} />
           <Route path="/riwayat" element={<Riwayat />} />
           <Route path="/profil" element={<Profil />} />

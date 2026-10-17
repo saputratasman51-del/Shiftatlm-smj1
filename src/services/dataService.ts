@@ -12,6 +12,10 @@ import {
   HandoverStatus,
   ShiftSwap,
   ShiftSwapStatus,
+  ChatRoom,
+  ChatMessage,
+  MessageType,
+  Announcement,
 } from '../types';
 
 // Default 17 categories according to requirement F.2
@@ -2603,6 +2607,186 @@ class DataService {
     localStorage.removeItem(STORAGE_KEYS.SHIFT_SWAPS);
     localStorage.removeItem('shift_atlm_hero_image');
     this.initLocalData();
+  }
+
+  // --- CHAT LAB SERVICE METHODS ---
+  public async getChatRooms(): Promise<ChatRoom[]> {
+    if (this.isSupabaseAvailable()) {
+      try {
+        const { data, error } = await supabase
+          .from('chat_rooms')
+          .select('*')
+          .order('order_index', { ascending: true });
+        if (!error && data && data.length > 0) {
+          return data;
+        }
+      } catch (e) {
+        console.warn('Fallback to local chat rooms:', e);
+      }
+    }
+
+    return [
+      { id: 'room-pelayanan', name: 'Pelayanan Lab & Cito', topic: 'Pelayanan', description: 'Koordinasi harian pelayanan spesimen rutin & cito', icon: 'Activity', color_code: '#0d9488', order_index: 1 },
+      { id: 'room-hematologi', name: 'Hematologi', topic: 'Unit Lab', description: 'Diskusi pemeriksaan darah rutin, hemostasis, dan apusan', icon: 'Droplet', color_code: '#e11d48', order_index: 2 },
+      { id: 'room-kimia', name: 'Kimia Klinik', topic: 'Unit Lab', description: 'Diskusi fotometri, elektrolit, fungsi hati & ginjal', icon: 'FlaskConical', color_code: '#2563eb', order_index: 3 },
+      { id: 'room-mikro', name: 'Mikrobiologi & TB', topic: 'Unit Lab', description: 'Diskusi mikroskopis BTA, kultur, dan resistensi kuman', icon: 'Eye', color_code: '#7c3aed', order_index: 4 },
+      { id: 'room-bank-darah', name: 'Bank Darah / BDRS', topic: 'Bank Darah', description: 'Koordinasi stok darah, donor, crossmatch, dan transfusi cito', icon: 'HeartPulse', color_code: '#dc2626', order_index: 5 },
+      { id: 'room-alat', name: 'Alat & Maintenance', topic: 'Teknis', description: 'Laporan troubleshooting alat analiser, kalibrasi, dan maintenance', icon: 'Wrench', color_code: '#d97706', order_index: 6 },
+      { id: 'room-reagen', name: 'Reagen & Logistik', topic: 'Logistik', description: 'Stok reagen menipis, expired date, dan permintaan barang farmasi', icon: 'Package', color_code: '#059669', order_index: 7 },
+      { id: 'room-umum', name: 'Ruang Umum & Diskusi', topic: 'Umum', description: 'Diskusi santai, pengumuman kepegawaian, dan jadwal dinas', icon: 'MessageSquare', color_code: '#475569', order_index: 8 },
+    ];
+  }
+
+  public async getChatMessages(roomId: string, limit = 30): Promise<ChatMessage[]> {
+    if (!roomId) return [];
+    if (this.isSupabaseAvailable()) {
+      try {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .eq('room_id', roomId)
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+
+        if (!error && data) {
+          const profiles = await this.getProfiles();
+          const messages = data.reverse().map((m: any) => ({
+            ...m,
+            sender: profiles.find((p) => p.id === m.sender_id),
+          }));
+          return messages;
+        }
+      } catch (e) {
+        console.warn('Error fetching chat messages:', e);
+      }
+    }
+    return [];
+  }
+
+  public async sendChatMessage(payload: {
+    room_id: string;
+    sender_id: string;
+    content: string;
+    message_type?: MessageType;
+    parent_message_id?: string;
+    mentions?: string[];
+  }): Promise<ChatMessage | null> {
+    const newMessage: ChatMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      room_id: payload.room_id,
+      sender_id: payload.sender_id,
+      content: payload.content,
+      message_type: payload.message_type || 'text',
+      parent_message_id: payload.parent_message_id,
+      mentions: payload.mentions || [],
+      created_at: new Date().toISOString(),
+    };
+
+    if (this.isSupabaseAvailable()) {
+      try {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .insert([newMessage])
+          .select()
+          .single();
+
+        if (!error && data) {
+          this.broadcastChange('chat_messages', 'INSERT', data);
+          const profiles = await this.getProfiles();
+          return {
+            ...data,
+            sender: profiles.find((p) => p.id === data.sender_id),
+          };
+        }
+      } catch (e) {
+        console.warn('Supabase send chat message error:', e);
+      }
+    }
+    return newMessage;
+  }
+
+  public async addChatReaction(messageId: string, profileId: string, emoji: string): Promise<boolean> {
+    if (!messageId || !profileId || !emoji) return false;
+    const reaction = {
+      id: `react_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      message_id: messageId,
+      profile_id: profileId,
+      emoji,
+      created_at: new Date().toISOString(),
+    };
+
+    if (this.isSupabaseAvailable()) {
+      try {
+        const { error } = await supabase.from('chat_reactions').upsert([reaction], {
+          onConflict: 'message_id,profile_id,emoji',
+        });
+        if (!error) {
+          this.broadcastChange('chat_reactions', 'INSERT', reaction);
+          return true;
+        }
+      } catch (e) {
+        console.warn('Error adding chat reaction:', e);
+      }
+    }
+    return false;
+  }
+
+  public async getAnnouncements(): Promise<Announcement[]> {
+    if (this.isSupabaseAvailable()) {
+      try {
+        const { data, error } = await supabase
+          .from('announcements')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && data) {
+          const profiles = await this.getProfiles();
+          return data.map((ann: any) => ({
+            ...ann,
+            creator: profiles.find((p) => p.id === ann.created_by),
+          }));
+        }
+      } catch (e) {
+        console.warn('Error fetching announcements:', e);
+      }
+    }
+    return [];
+  }
+
+  public async saveAnnouncement(announcement: Partial<Announcement>): Promise<Announcement | null> {
+    const payload = {
+      id: announcement.id || `ann_${Date.now()}`,
+      title: announcement.title || 'Pengumuman Laboratorium',
+      content: announcement.content || '',
+      priority: announcement.priority || 'normal',
+      target_role: announcement.target_role || 'all',
+      created_by: announcement.created_by || 'user-admin-1',
+      requires_read: announcement.requires_read ?? true,
+      created_at: announcement.created_at || new Date().toISOString(),
+    };
+
+    if (this.isSupabaseAvailable()) {
+      try {
+        const { data, error } = await supabase
+          .from('announcements')
+          .upsert([payload])
+          .select()
+          .single();
+
+        if (!error && data) {
+          this.broadcastChange('announcements', 'INSERT', data);
+          const profiles = await this.getProfiles();
+          return {
+            ...data,
+            creator: profiles.find((p) => p.id === data.created_by),
+          };
+        }
+      } catch (e) {
+        console.warn('Error saving announcement:', e);
+      }
+    }
+    return payload as Announcement;
   }
 }
 

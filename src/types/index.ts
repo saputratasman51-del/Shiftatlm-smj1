@@ -164,3 +164,88 @@ export interface ShiftSwap {
   shift?: Shift;
   target_shift?: Shift;
 }
+
+// --- CHAT LAB & ANNOUNCEMENTS TYPES ---
+export interface ChatRoom {
+  id: string;
+  name: string;
+  topic: string;
+  description?: string;
+  icon?: string;
+  color_code?: string;
+  is_private?: boolean;
+  order_index?: number;
+  created_at?: string;
+  unread_count?: number;
+}
+
+export interface ChatMember {
+  id: string;
+  room_id: string;
+  profile_id: string;
+  last_read_at?: string;
+  is_muted?: boolean;
+  created_at?: string;
+}
+
+export type MessageType = 'text' | 'important' | 'urgent' | 'announcement' | 'task' | 'image';
+
+export interface ChatAttachment {
+  id: string;
+  message_id: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  file_url: string;
+  created_at?: string;
+}
+
+export interface ChatReaction {
+  id: string;
+  message_id: string;
+  profile_id: string;
+  emoji: string;
+  created_at?: string;
+  profile?: UserProfile;
+}
+
+export interface ChatMessage {
+  id: string;
+  room_id: string;
+  sender_id: string;
+  content: string;
+  message_type: MessageType;
+  parent_message_id?: string;
+  mentions?: string[];
+  is_pinned?: boolean;
+  created_at: string;
+  updated_at?: string;
+  deleted_at?: string;
+  // Joins & metadata
+  sender?: UserProfile;
+  attachments?: ChatAttachment[];
+  reactions?: ChatReaction[];
+  replies_count?: number;
+  replies?: ChatMessage[];
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  priority: 'normal' | 'important' | 'urgent';
+  target_role?: string;
+  target_shift_id?: string;
+  target_unit?: string;
+  created_by: string;
+  start_date?: string;
+  end_date?: string;
+  requires_read?: boolean;
+  created_at: string;
+  // Joins
+  creator?: UserProfile;
+  read_count?: number;
+  total_users?: number;
+  is_read_by_me?: boolean;
+}
+
