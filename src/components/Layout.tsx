@@ -298,10 +298,19 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         </div>
 
-        {/* Right side: PWA install, Realtime status, NotificationBell & Menu toggle */}
+        {/* Right side: PWA install, Realtime status, Chat Lab, NotificationBell & Menu toggle */}
         <div className="flex items-center gap-1.5 shrink-0">
           <PWAInstallButton compact />
           <RealtimeStatusIndicator compact />
+          <button
+            onClick={() => navigate('/chat')}
+            aria-label="Buka Chat Lab"
+            className="p-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl shadow-sm transition flex items-center justify-center relative"
+            title="Chat Lab & Koordinasi"
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span className="absolute -top-1 -right-1 w-2 h-2 bg-rose-500 rounded-full animate-ping"></span>
+          </button>
           <NotificationBell />
 
           <button
