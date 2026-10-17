@@ -36,6 +36,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import { SerahTerimaSkeleton } from '../components/SkeletonLoader';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   dataService,
   getPontianakDateString,
@@ -2164,33 +2165,17 @@ export default function SerahTerima() {
       )}
 
       {/* MODAL: KONFIRMASI HAPUS */}
-      {deleteTargetHandover && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
-            <h3 className="font-bold text-lg text-slate-900">Konfirmasi Hapus</h3>
-            <p className="text-sm text-slate-600 mt-2">
-              Apakah Anda yakin ingin menghapus {deleteTargetHandover.status === 'draft' ? 'draf ini' : 'data operan ini'}?
-              {deleteTargetHandover.status !== 'draft' && ' Data yang dihapus tidak dapat dikembalikan.'}
-            </p>
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={() => setDeleteTargetHandover(null)}
-                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-lg transition-colors"
-                disabled={isDeleting}
-              >
-                Batal
-              </button>
-              <button
-                onClick={executeDeleteHandover}
-                className="flex-1 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
-                disabled={isDeleting}
-              >
-                {isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={!!deleteTargetHandover}
+        title="Hapus Data Operan?"
+        message={`Apakah Anda yakin ingin menghapus ${deleteTargetHandover?.status === 'draft' ? 'draf ini' : 'data operan ini'}? ${deleteTargetHandover?.status !== 'draft' ? 'Data yang dihapus tidak dapat dikembalikan.' : ''}`}
+        confirmLabel="Ya, Hapus"
+        cancelLabel="Batal"
+        isLoading={isDeleting}
+        onConfirm={executeDeleteHandover}
+        onCancel={() => setDeleteTargetHandover(null)}
+        type="danger"
+      />
 
       {/* =========================================================================
           MODAL: DETAIL LENGKAP ARSIP OPERAN

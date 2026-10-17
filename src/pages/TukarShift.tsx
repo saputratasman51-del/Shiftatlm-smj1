@@ -33,6 +33,7 @@ import { useAuth } from '../context/AuthContext';
 import { dataService, getPontianakDateString } from '../services/dataService';
 import { ShiftSwap, UserProfile, Shift, ShiftAssignment } from '../types';
 import { useToast } from '../components/Toast';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SwapReminderBanner } from '../components/SwapReminderBanner';
 import { playAlarmSound } from '../utils/alarmSound';
 import { pushNotificationService } from '../services/pushNotificationService';
@@ -251,12 +252,42 @@ export default function TukarShift() {
     refetch();
   };
 
-  const handleDeleteSwap = async (swap: ShiftSwap) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus pengajuan tukar shift ini? Data jadwal akan kembali ke semula.')) return;
-    
-    await dataService.deleteShiftSwap(swap.id);
-    showToast('Berhasil Dihapus', 'Tukar shift telah dihapus dan jadwal dikembalikan ke asal.');
-    refetch();
+  const [deleteTargetSwap, setDeleteTargetSwap] = useState<ShiftSwap | null>(null);
+  const [cancelTargetSwap, setCancelTargetSwap] = useState<ShiftSwap | null>(null);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
+
+  const handleDeleteSwap = (swap: ShiftSwap) => {
+    setDeleteTargetSwap(swap);
+  };
+
+  const confirmDeleteSwap = async () => {
+    if (!deleteTargetSwap) return;
+    setIsProcessingAction(true);
+    try {
+      await dataService.deleteShiftSwap(deleteTargetSwap.id);
+      showToast('Tukar Shift Dihapus', 'Data pertukaran shift dihapus dan jadwal dikembalikan.');
+      setDeleteTargetSwap(null);
+      refetch();
+    } catch {
+      showToast('Gagal Menghapus', 'Terjadi kesalahan sistem saat menghapus tukar shift', 'error');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const confirmCancelSwap = async () => {
+    if (!cancelTargetSwap) return;
+    setIsProcessingAction(true);
+    try {
+      await dataService.cancelShiftSwap(cancelTargetSwap.id, activeProfile.id);
+      showToast('Tukar Shift Dibatalkan', 'Jadwal shift petugas dikembalikan ke shift awal secara otomatis.');
+      setCancelTargetSwap(null);
+      refetch();
+    } catch {
+      showToast('Gagal Membatalkan', 'Terjadi kesalahan sistem saat membatalkan tukar shift', 'error');
+    } finally {
+      setIsProcessingAction(false);
+    }
   };
 
   const handleBroadcastWhatsAppAll = (swap: ShiftSwap) => {
@@ -659,27 +690,16 @@ export default function TukarShift() {
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {s.status === 'approved' && (
                             <button
-                              onClick={async () => {
-                                if (window.confirm('Batalkan tukar shift ini? Jadwal petugas akan otomatis dikembalikan ke shift awal.')) {
-                                  await dataService.cancelShiftSwap(s.id, activeProfile.id);
-                                  showToast('Tukar Shift Dibatalkan', 'Jadwal shift petugas dikembalikan ke shift awal secara otomatis.');
-                                  refetch();
-                                }
-                              }}
+                              onClick={() => setCancelTargetSwap(s)}
                               className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-3 rounded-xl transition-all shadow-sm active:scale-95"
+                              title="Batalkan pertukaran shift"
                             >
                               <RotateCcw className="w-3.5 h-3.5" />
                               <span>Batalkan</span>
                             </button>
                           )}
                           <button
-                            onClick={async () => {
-                              if (window.confirm('Hapus pengajuan tukar shift ini? Jika sudah disetujui, jadwal akan dikembalikan ke shift awal.')) {
-                                await dataService.deleteShiftSwap(s.id);
-                                showToast('Tukar Shift Dihapus', 'Data pertukaran shift dihapus dan jadwal dikembalikan.');
-                                refetch();
-                              }
-                            }}
+                            onClick={() => setDeleteTargetSwap(s)}
                             className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-3 rounded-xl transition-all shadow-sm active:scale-95"
                             title="Hapus tukar shift dan kembalikan jadwal"
                           >
@@ -1007,6 +1027,32 @@ export default function TukarShift() {
           </div>
         </div>
       )}
+
+      {/* Dialog Konfirmasi Hapus Pengajuan Tukar Shift */}
+      <ConfirmDialog
+        isOpen={!!deleteTargetSwap}
+        title="Hapus Data Tukar Shift?"
+        message={`Apakah Anda yakin ingin menghapus data pengajuan tukar shift tanggal ${deleteTargetSwap?.shift_date}? Jika pertukaran ini telah disetujui, jadwal dinas kedua petugas akan otomatis dikembalikan ke shift awal.`}
+        confirmLabel="Ya, Hapus"
+        cancelLabel="Batal"
+        isLoading={isProcessingAction}
+        onConfirm={confirmDeleteSwap}
+        onCancel={() => setDeleteTargetSwap(null)}
+        type="danger"
+      />
+
+      {/* Dialog Konfirmasi Batalkan Pertukaran Shift */}
+      <ConfirmDialog
+        isOpen={!!cancelTargetSwap}
+        title="Batalkan Tukar Shift?"
+        message={`Apakah Anda yakin ingin membatalkan pertukaran shift tanggal ${cancelTargetSwap?.shift_date}? Jadwal tugas jaga petugas akan otomatis dikembalikan ke shift semula.`}
+        confirmLabel="Ya, Batalkan"
+        cancelLabel="Kembali"
+        isLoading={isProcessingAction}
+        onConfirm={confirmCancelSwap}
+        onCancel={() => setCancelTargetSwap(null)}
+        type="cancel"
+      />
     </div>
   );
 }

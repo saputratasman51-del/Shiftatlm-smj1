@@ -43,6 +43,7 @@ export default function Login() {
   // PWA Install Prompt State
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isPwaInstalled, setIsPwaInstalled] = useState(false);
+  const [showPwaGuideModal, setShowPwaGuideModal] = useState(false);
 
   // Reset Password State
   const [showResetModal, setShowResetModal] = useState(false);
@@ -78,9 +79,7 @@ export default function Login() {
         setDeferredPrompt(null);
       }
     } else {
-      alert(
-        'Untuk menginstal aplikasi:\n• Pada Chrome Android/PC: Klik menu titik tiga di pojok kanan atas lalu pilih "Instal aplikasi" atau "Tambahkan ke Layar Utama".\n• Pada Safari iOS: Ketuk tombol Bagikan lalu pilih "Tambahkan ke Beranda".'
-      );
+      setShowPwaGuideModal(true);
     }
   };
 
@@ -503,6 +502,46 @@ export default function Login() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* PWA Installation Guide Modal (replaces browser alert) */}
+      {showPwaGuideModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 relative animate-scale-up space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0">
+                <Smartphone className="w-5 h-5 text-teal-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Panduan Instalasi PWA</h3>
+                <p className="text-[11px] text-slate-500">SHIFT ATLM RSUD SMJ I</p>
+              </div>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-slate-700 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+              <div className="flex items-start gap-2">
+                <span className="font-bold text-teal-700 shrink-0">1.</span>
+                <p>
+                  <strong>Chrome (Android / PC):</strong> Klik ikon titik tiga (<span className="font-mono">⋮</span>) di pojok kanan atas browser, lalu pilih <strong>&quot;Instal aplikasi&quot;</strong> atau <strong>&quot;Tambahkan ke Layar Utama&quot;</strong>.
+                </p>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="font-bold text-teal-700 shrink-0">2.</span>
+                <p>
+                  <strong>Safari (iPhone / iPad):</strong> Ketuk tombol Bagikan (ikon kotak panah ke atas), lalu pilih <strong>&quot;Tambahkan ke Layar Utama&quot;</strong>.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowPwaGuideModal(false)}
+              className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 rounded-xl text-xs shadow-md transition active:scale-95 cursor-pointer"
+            >
+              Mengerti &amp; Tutup
+            </button>
           </div>
         </div>
       )}

@@ -20,6 +20,7 @@ import { dataService, AVATAR_PRESETS } from '../services/dataService';
 import { UserProfile } from '../types';
 import { useToast } from '../components/Toast';
 import { Avatar } from '../components/Avatar';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { compressImage } from '../utils/compressImage';
 
 export default function Petugas() {
@@ -159,16 +160,30 @@ export default function Petugas() {
     loadProfiles();
   };
 
-  const handleDeleteProfile = async (p: UserProfile) => {
+  const [deleteTargetProfile, setDeleteTargetProfile] = useState<UserProfile | null>(null);
+  const [isDeletingProfile, setIsDeletingProfile] = useState(false);
+
+  const handleDeleteProfile = (p: UserProfile) => {
     if (p.id === activeProfile.id) {
-      showToast('Gagal Menghapus', 'Anda tidak dapat menghapus akun yang sedang Anda gunakan saat ini.');
+      showToast('Gagal Menghapus', 'Anda tidak dapat menghapus akun yang sedang Anda gunakan saat ini.', 'error');
       return;
     }
-    if (window.confirm(`Apakah Anda yakin ingin menghapus data petugas ${p.full_name}?`)) {
-      await dataService.deleteProfile(p.id);
+    setDeleteTargetProfile(p);
+  };
+
+  const confirmDeleteProfile = async () => {
+    if (!deleteTargetProfile) return;
+    setIsDeletingProfile(true);
+    try {
+      await dataService.deleteProfile(deleteTargetProfile.id);
       await refreshProfiles();
-      showToast('Petugas Dihapus', `Data petugas ${p.full_name} berhasil dihapus`);
+      showToast('Petugas Dihapus', `Data petugas ${deleteTargetProfile.full_name} berhasil dihapus`);
+      setDeleteTargetProfile(null);
       loadProfiles();
+    } catch (err) {
+      showToast('Gagal Menghapus', 'Terjadi kesalahan sistem saat menghapus data petugas.', 'error');
+    } finally {
+      setIsDeletingProfile(false);
     }
   };
 
@@ -543,6 +558,19 @@ export default function Petugas() {
           </div>
         </div>
       )}
+
+      {/* Dialog Konfirmasi Hapus Petugas */}
+      <ConfirmDialog
+        isOpen={!!deleteTargetProfile}
+        title="Hapus Data Petugas?"
+        message={`Apakah Anda yakin ingin menghapus data petugas ${deleteTargetProfile?.full_name}? Akun dan riwayat terkait petugas ini akan dihapus permanen.`}
+        confirmLabel="Ya, Hapus"
+        cancelLabel="Batal"
+        isLoading={isDeletingProfile}
+        onConfirm={confirmDeleteProfile}
+        onCancel={() => setDeleteTargetProfile(null)}
+        type="danger"
+      />
     </div>
   );
 }

@@ -23,6 +23,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { dataService } from '../services/dataService';
 import { Handover, Shift, UserProfile } from '../types';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 export default function Riwayat() {
   const { activeProfile, isAdmin } = useAuth();
@@ -45,6 +46,7 @@ export default function Riwayat() {
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 8;
+  const [deleteTarget, setDeleteTarget] = useState<Handover | null>(null);
 
   const loadData = async (forceSpinner = false) => {
     if (handovers.length === 0 || forceSpinner) {
@@ -304,12 +306,7 @@ export default function Riwayat() {
 
                   {isAdmin && (
                     <button
-                      onClick={async () => {
-                        if (window.confirm(`Yakin ingin menghapus arsip serah terima tanggal ${ho.shift_date}?`)) {
-                          await dataService.deleteHandover(ho.id);
-                          loadData();
-                        }
-                      }}
+                      onClick={() => setDeleteTarget(ho)}
                       className="bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold py-2 px-3 rounded-xl flex items-center justify-center transition-colors min-h-[40px]"
                       title="Hapus Arsip Serah Terima"
                     >
@@ -508,6 +505,25 @@ export default function Riwayat() {
           </div>
         </div>
       )}
+
+      {/* Dialog Konfirmasi Hapus Arsip */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        title="Hapus Data Operan?"
+        message={`Apakah Anda yakin ingin menghapus arsip serah terima tanggal ${deleteTarget?.shift_date}? Data yang dihapus tidak dapat dikembalikan.`}
+        confirmLabel="Ya, Hapus"
+        cancelLabel="Batal"
+        onConfirm={async () => {
+          if (deleteTarget) {
+            await dataService.deleteHandover(deleteTarget.id);
+            setDeleteTarget(null);
+            loadData();
+          }
+        }}
+        onCancel={() => setDeleteTarget(null)}
+        type="danger"
+      />
     </div>
   );
 }
+

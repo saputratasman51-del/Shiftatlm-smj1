@@ -23,6 +23,7 @@ import { useAuth } from '../context/AuthContext';
 import { dataService } from '../services/dataService';
 import { Shift, HandoverCategory, AuditLog } from '../types';
 import { useToast } from '../components/Toast';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { supabase } from '../lib/supabase';
 import { SUPABASE_PATCH_SQL } from '../lib/supabaseSqlScripts';
 
@@ -119,13 +120,18 @@ export default function AdminSettings() {
     }
   };
 
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
   // Reset to seed
   const handleResetData = () => {
-    if (window.confirm('Reset seluruh data lokal ke konfigurasi awal RSUD SMJ I?')) {
-      dataService.resetToDefaultSeed();
-      showToast('Data Direset', 'Data berhasil dikembalikan ke pengaturan awal');
-      loadData();
-    }
+    setShowResetConfirm(true);
+  };
+
+  const performReset = () => {
+    dataService.resetToDefaultSeed();
+    showToast('Data Direset', 'Data berhasil dikembalikan ke pengaturan awal');
+    setShowResetConfirm(false);
+    loadData();
   };
 
   const handleSaveHeroImage = (e: React.FormEvent) => {
@@ -696,6 +702,14 @@ export default function AdminSettings() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        isOpen={showResetConfirm}
+        title="Reset Seluruh Data?"
+        message="Apakah Anda yakin ingin mereset seluruh data lokal ke konfigurasi awal RSUD SMJ I? Tindakan ini tidak dapat dibatalkan."
+        onConfirm={performReset}
+        onCancel={() => setShowResetConfirm(false)}
+        type="danger"
+      />
     </div>
   );
 }

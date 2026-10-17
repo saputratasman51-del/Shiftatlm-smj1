@@ -31,6 +31,7 @@ import { JadwalSkeleton } from '../components/SkeletonLoader';
 import { dataService, getPontianakDateString } from '../services/dataService';
 import { Shift, ShiftAssignment, UserProfile } from '../types';
 import { useToast } from '../components/Toast';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { playAlarmSound } from '../utils/alarmSound';
 import { VoiceAssistant } from '../components/VoiceAssistant';
 
@@ -1189,31 +1190,20 @@ export default function JadwalShift() {
       {/* =========================================================================
           MODAL KONFIRMASI HAPUS
       ========================================================================= */}
-      {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-xs w-full p-5 shadow-2xl border border-slate-200 text-center animate-scale-up">
-            <Trash2 className="w-10 h-10 text-rose-500 mx-auto mb-2" />
-            <h3 className="font-bold text-slate-900 text-sm">Hapus Jadwal Shift Ini?</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              Jadwal yang dihapus tidak dapat dipulihkan. Apakah Anda yakin?
-            </p>
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={() => handleDeleteAssignment(deleteConfirmId)}
-                className="flex-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-2.5 rounded-xl transition-colors"
-              >
-                Ya, Hapus
-              </button>
-              <button
-                onClick={() => setDeleteConfirmId(null)}
-                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2.5 rounded-xl transition-colors"
-              >
-                Batal
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={!!deleteConfirmId}
+        title="Hapus Jadwal Shift Ini?"
+        message="Apakah Anda yakin ingin menghapus jadwal dinas ini? Jadwal yang dihapus tidak dapat dipulihkan."
+        confirmLabel="Ya, Hapus"
+        cancelLabel="Batal"
+        onConfirm={() => {
+          if (deleteConfirmId) {
+            handleDeleteAssignment(deleteConfirmId);
+          }
+        }}
+        onCancel={() => setDeleteConfirmId(null)}
+        type="danger"
+      />
 
       {/* =========================================================================
           MODAL UCAPAN ALARM LIBUR: "Selamat berlibur bersama keluarga tercinta"
