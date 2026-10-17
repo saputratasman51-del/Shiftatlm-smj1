@@ -3,22 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/Toast';
 import { Layout } from './components/Layout';
-
-import Dashboard from './pages/Dashboard';
-import JadwalShift from './pages/JadwalShift';
-import TukarShift from './pages/TukarShift';
-import SerahTerima from './pages/SerahTerima';
-import Petugas from './pages/Petugas';
-import Riwayat from './pages/Riwayat';
-import Profil from './pages/Profil';
-import AdminSettings from './pages/AdminSettings';
+import { DashboardSkeleton } from './components/SkeletonLoader';
 import Login from './pages/Login';
+
+// Lazy-loaded routes for fast initial bundle and instant app launch
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const JadwalShift = lazy(() => import('./pages/JadwalShift'));
+const TukarShift = lazy(() => import('./pages/TukarShift'));
+const SerahTerima = lazy(() => import('./pages/SerahTerima'));
+const Petugas = lazy(() => import('./pages/Petugas'));
+const Riwayat = lazy(() => import('./pages/Riwayat'));
+const Profil = lazy(() => import('./pages/Profil'));
+const AdminSettings = lazy(() => import('./pages/AdminSettings'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,18 +51,20 @@ function AppContent() {
 
   return (
     <Layout>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/jadwal" element={<JadwalShift />} />
-        <Route path="/tukar-shift" element={<TukarShift />} />
-        <Route path="/serah-terima" element={<SerahTerima />} />
-        <Route path="/petugas" element={<Petugas />} />
-        <Route path="/riwayat" element={<Riwayat />} />
-        <Route path="/profil" element={<Profil />} />
-        <Route path="/admin" element={<AdminSettings />} />
-        {/* Catch-all redirect */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<DashboardSkeleton />}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/jadwal" element={<JadwalShift />} />
+          <Route path="/tukar-shift" element={<TukarShift />} />
+          <Route path="/serah-terima" element={<SerahTerima />} />
+          <Route path="/petugas" element={<Petugas />} />
+          <Route path="/riwayat" element={<Riwayat />} />
+          <Route path="/profil" element={<Profil />} />
+          <Route path="/admin" element={<AdminSettings />} />
+          {/* Catch-all redirect */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </Layout>
   );
 }

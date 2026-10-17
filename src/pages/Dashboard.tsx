@@ -291,8 +291,8 @@ export default function Dashboard() {
       const [assignments, shifts, handovers, tasks, categories] = await Promise.all([
         dataService.getAssignments({ date: todayStr }),
         dataService.getShifts(),
-        dataService.getHandovers(),
-        dataService.getPendingTasks(),
+        dataService.getHandovers({ limit: 100 }),
+        dataService.getPendingTasks({ activeOnly: true }),
         dataService.getCategories(),
       ]);
 
@@ -396,14 +396,25 @@ export default function Dashboard() {
   }, [dashboardData]);
 
   useEffect(() => {
-    const unsubscribe = dataService.subscribe(() => {
-      refetch();
-      dataService.getProfiles().then(setAllProfilesList);
-      dataService.getAssignments({ month: selectedMonthForStaff }).then(setMonthlyAssignments);
+    let debounceTimer: any = null;
+    const unsubscribe = dataService.subscribe((event) => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        refetch();
+        if (event?.table === 'profiles' || event?.table === 'ALL') {
+          dataService.getProfiles().then(setAllProfilesList);
+        }
+        if (event?.table === 'shift_assignments' || event?.table === 'ALL') {
+          dataService.getAssignments({ month: selectedMonthForStaff }).then(setMonthlyAssignments);
+        }
+      }, 350);
     });
 
-    return () => unsubscribe();
-  }, [selectedMonthForStaff]);
+    return () => {
+      clearTimeout(debounceTimer);
+      unsubscribe();
+    };
+  }, [selectedMonthForStaff, refetch]);
 
   // Ringkasan Jadwal Harian Hari Ini (Pagi, Siang, Malam)
   const dailyShiftSummary = React.useMemo(() => {

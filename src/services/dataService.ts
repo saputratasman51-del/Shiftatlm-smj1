@@ -768,14 +768,15 @@ class DataService {
       });
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-          console.log('Tab visible, checking sync & realtime...');
-          this.reconnectAndSync();
+          const now = Date.now();
+          const last = this.syncStatus.lastSynced ? new Date(this.syncStatus.lastSynced).getTime() : 0;
+          // Only re-sync if tab was inactive for more than 60 seconds
+          if (now - last > 60000) {
+            console.log('Tab visible after idle, checking sync & realtime...');
+            this.reconnectAndSync();
+          }
         }
       });
-      // Background heartbeat sync every 12 seconds for multi-browser consistency
-      this.heartbeatTimer = setInterval(() => {
-        this.syncAllFromRemote();
-      }, 12000);
     }
   }
 
@@ -1191,33 +1192,93 @@ class DataService {
     });
   }
 
+  private updateLocalCacheIncremental(storageKey: string, action: string, item: any): boolean {
+    if (!item?.id) return false;
+    try {
+      const local = localStorage.getItem(storageKey);
+      const list: any[] = local ? JSON.parse(local) : [];
+      let updated = false;
+
+      if (action === 'DELETE') {
+        const filtered = list.filter((x) => x.id !== item.id);
+        if (filtered.length !== list.length) {
+          this.safeLocalStorageSet(storageKey, JSON.stringify(filtered));
+          updated = true;
+        }
+      } else if (action === 'INSERT') {
+        const existingIdx = list.findIndex((x) => x.id === item.id);
+        if (existingIdx >= 0) {
+          list[existingIdx] = { ...list[existingIdx], ...item };
+        } else {
+          list.unshift(item);
+        }
+        this.safeLocalStorageSet(storageKey, JSON.stringify(list));
+        updated = true;
+      } else if (action === 'UPDATE') {
+        const existingIdx = list.findIndex((x) => x.id === item.id);
+        if (existingIdx >= 0) {
+          list[existingIdx] = { ...list[existingIdx], ...item };
+        } else {
+          list.push(item);
+        }
+        this.safeLocalStorageSet(storageKey, JSON.stringify(list));
+        updated = true;
+      }
+      return updated;
+    } catch (e) {
+      console.warn('Error in updateLocalCacheIncremental:', e);
+      return false;
+    }
+  }
+
   private async handleRemoteChange(table: string, action: any, data: any) {
     this.updateStatus({ lastSynced: new Date() });
 
-    // Instantly notify listeners so UI can react without waiting for network
-    this.notifyListeners({ table, action: (action || 'SYNC') as any, data });
+    const normalizedAction = ((action || 'SYNC') as string).toUpperCase();
 
-    // Sync remote data into local storage cache in the background
-    try {
-      if (table === 'profiles') {
-        await this.getProfiles(true);
-      } else if (table === 'shift_assignments') {
-        await this.getAssignments(undefined, true);
-      } else if (table === 'handovers') {
-        await this.getHandovers(undefined, true);
-      } else if (table === 'pending_tasks') {
-        await this.getPendingTasks(undefined, true);
-      } else if (table === 'shift_swaps') {
-        await this.getShiftSwaps(true);
-      } else if (table === 'shifts') {
-        await this.getShifts(true);
+    // Map table name to localStorage cache key
+    const tableKeyMap: Record<string, string> = {
+      profiles: STORAGE_KEYS.PROFILES,
+      shift_assignments: STORAGE_KEYS.ASSIGNMENTS,
+      handovers: STORAGE_KEYS.HANDOVERS,
+      pending_tasks: STORAGE_KEYS.PENDING_TASKS,
+      shift_swaps: STORAGE_KEYS.SHIFT_SWAPS,
+      shifts: STORAGE_KEYS.SHIFTS,
+      handover_categories: STORAGE_KEYS.CATEGORIES,
+    };
+
+    const storageKey = tableKeyMap[table];
+
+    // Incremental cache update: if event is a single row change, avoid full table re-fetch!
+    if (
+      storageKey &&
+      data &&
+      data.id &&
+      (normalizedAction === 'INSERT' || normalizedAction === 'UPDATE' || normalizedAction === 'DELETE')
+    ) {
+      this.updateLocalCacheIncremental(storageKey, normalizedAction, data);
+    } else if (normalizedAction === 'SYNC') {
+      try {
+        if (table === 'profiles') {
+          await this.getProfiles(true);
+        } else if (table === 'shift_assignments') {
+          await this.getAssignments(undefined, true);
+        } else if (table === 'handovers') {
+          await this.getHandovers(undefined, true);
+        } else if (table === 'pending_tasks') {
+          await this.getPendingTasks(undefined, true);
+        } else if (table === 'shift_swaps') {
+          await this.getShiftSwaps(true);
+        } else if (table === 'shifts') {
+          await this.getShifts(true);
+        }
+      } catch (e) {
+        console.warn('Error in handleRemoteChange background sync:', e);
       }
-    } catch (e) {
-      console.warn('Error in handleRemoteChange background sync:', e);
     }
 
-    // Notify listeners again after full relations are cached
-    this.notifyListeners({ table, action: (action || 'SYNC') as any, data });
+    // Unified notification to listeners with event details
+    this.notifyListeners({ table, action: normalizedAction as any, data });
   }
 
   /**
@@ -1677,15 +1738,11 @@ class DataService {
   }
 
   public async saveAssignment(assignment: ShiftAssignment): Promise<{ success: boolean; conflict?: string }> {
-    const all = await this.getAssignments();
-
-    // Check for schedule conflict: same staff on the same date with the SAME shift.
-    // Double shifts (different shifts on the same day) are fully allowed.
-    const conflict = all.find(
+    // Targeted conflict check only on the specific date and staff:
+    const onDate = await this.getAssignments({ date: assignment.shift_date, profileId: assignment.profile_id });
+    const conflict = onDate.find(
       (a) =>
         a.id !== assignment.id &&
-        a.profile_id === assignment.profile_id &&
-        a.shift_date === assignment.shift_date &&
         a.shift_id === assignment.shift_id &&
         a.status !== 'cancelled'
     );
@@ -1697,8 +1754,9 @@ class DataService {
       };
     }
 
-    const idx = all.findIndex((a) => a.id === assignment.id);
-    const updated = idx >= 0 ? all.map((a) => (a.id === assignment.id ? assignment : a)) : [...all, assignment];
+    const cachedList = this.getCachedAssignments();
+    const idx = cachedList.findIndex((a) => a.id === assignment.id);
+    const updated = idx >= 0 ? cachedList.map((a) => (a.id === assignment.id ? assignment : a)) : [...cachedList, assignment];
     this.safeLocalStorageSet(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(updated));
 
     if (this.isSupabaseAvailable()) {
@@ -1800,6 +1858,7 @@ class DataService {
       status?: HandoverStatus;
       giverId?: string;
       receiverId?: string;
+      limit?: number;
     },
     forceRefresh = false
   ): Promise<Handover[]> {
@@ -1810,6 +1869,7 @@ class DataService {
         let query = supabase.from('handovers').select('*').order('created_at', { ascending: false });
         if (filters?.date) query = query.eq('shift_date', filters.date);
         if (filters?.status) query = query.eq('status', filters.status);
+        if (filters?.limit) query = query.limit(filters.limit);
         const { data, error } = await query;
         if (!error && data && data.length > 0) {
           handovers = data;
@@ -1820,7 +1880,7 @@ class DataService {
               filtered = filtered.filter((h: any) => !deletedIds.includes(h.id));
             }
           } catch (e) {}
-          if (!filters?.date && !filters?.status) {
+          if (!filters?.date && !filters?.status && !filters?.limit) {
             this.safeLocalStorageSet(STORAGE_KEYS.HANDOVERS, JSON.stringify(filtered));
           } else {
             try {
@@ -1884,12 +1944,38 @@ class DataService {
   }
 
   public async getHandoverById(id: string): Promise<Handover | null> {
-    const all = await this.getHandovers();
-    return all.find((h) => h.id === id) || null;
+    if (!id) return null;
+    // Fast path: find in cache first
+    const cached = this.getCachedHandovers().find((h) => h.id === id);
+    if (cached) return cached;
+
+    if (this.isSupabaseAvailable()) {
+      try {
+        const { data, error } = await supabase
+          .from('handovers')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (!error && data) {
+          const [allShifts, allProfiles] = await Promise.all([this.getShifts(), this.getProfiles()]);
+          return {
+            ...data,
+            shift_from: allShifts.find((s) => s.id === data.shift_from_id),
+            shift_to: allShifts.find((s) => s.id === data.shift_to_id),
+            giver: allProfiles.find((p) => p.id === data.giver_profile_id),
+            receiver: allProfiles.find((p) => p.id === data.receiver_profile_id),
+          };
+        }
+      } catch (e) {
+        console.warn('Error fetching handover by id from Supabase:', e);
+      }
+    }
+    return null;
   }
 
   public async saveHandover(handover: Handover, logNote?: string): Promise<Handover> {
-    const all = await this.getHandovers();
+    const all = this.getCachedHandovers();
     const activeUser = await this.getActiveUser();
 
     // Auto calculate total patient count from categories
@@ -2036,17 +2122,30 @@ class DataService {
   }
 
   // --- PENDING TASKS ---
-  public async getPendingTasks(statusFilter?: string, forceRefresh = false): Promise<PendingTask[]> {
+  public async getPendingTasks(
+    filters?: { status?: string; limit?: number; activeOnly?: boolean } | string,
+    forceRefresh = false
+  ): Promise<PendingTask[]> {
     let tasks: PendingTask[] = [];
+    const statusFilter = typeof filters === 'string' ? filters : filters?.status;
+    const limit = typeof filters === 'object' ? filters?.limit : undefined;
+    const activeOnly = typeof filters === 'object' ? filters?.activeOnly : false;
 
     if (this.isSupabaseAvailable()) {
       try {
         let query = supabase.from('pending_tasks').select('*').order('created_at', { ascending: false });
-        if (statusFilter) query = query.eq('status', statusFilter);
+        if (statusFilter) {
+          query = query.eq('status', statusFilter);
+        } else if (activeOnly) {
+          query = query.in('status', ['belum_dikerjakan', 'dalam_proses']);
+        }
+        if (limit) {
+          query = query.limit(limit);
+        }
         const { data, error } = await query;
         if (!error && data) {
           tasks = data;
-          if (!statusFilter) {
+          if (!statusFilter && !limit && !activeOnly) {
             this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify(data));
           }
         }
@@ -2068,13 +2167,15 @@ class DataService {
 
     if (statusFilter) {
       tasks = tasks.filter((t) => t.status === statusFilter);
+    } else if (activeOnly) {
+      tasks = tasks.filter((t) => t.status === 'belum_dikerjakan' || t.status === 'dalam_proses');
     }
 
     return tasks;
   }
 
   public async savePendingTask(task: PendingTask): Promise<PendingTask> {
-    const tasks = await this.getPendingTasks();
+    const tasks = this.getCachedPendingTasks();
     const idx = tasks.findIndex((t) => t.id === task.id);
     const updated = idx >= 0 ? tasks.map((t) => (t.id === task.id ? task : t)) : [task, ...tasks];
     this.safeLocalStorageSet(STORAGE_KEYS.PENDING_TASKS, JSON.stringify(updated));
