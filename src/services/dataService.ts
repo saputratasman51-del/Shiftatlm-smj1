@@ -973,6 +973,10 @@ class DataService {
         'pending_tasks',
         'shift_swaps',
         'audit_logs',
+        'chat_rooms',
+        'chat_messages',
+        'chat_reactions',
+        'announcements',
       ];
 
       tables.forEach((table) => {

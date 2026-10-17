@@ -61,6 +61,20 @@ export default function ChatLab() {
     }
   }, [activeRoom]);
 
+  // Realtime subscription across all connected staff devices
+  useEffect(() => {
+    const unsubscribe = dataService.subscribe((event) => {
+      if (event?.table === 'chat_messages' || event?.table === 'chat_reactions' || event?.table === 'announcements' || event?.table === 'ALL') {
+        if (activeRoom) {
+          loadMessages(activeRoom.id);
+        }
+        loadRoomsAndAnnouncements();
+      }
+    });
+
+    return () => unsubscribe();
+  }, [activeRoom?.id]);
+
   const loadRoomsAndAnnouncements = async () => {
     setLoading(true);
     try {
